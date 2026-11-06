@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TrainLog</title>
+<style>
+:root{--bg:#0f1318;--card:#181e26;--line:#2a323d;--tx:#e8edf3;--mut:#8b97a6;--g:#2dd4a0;--o:#ffb020;--b:#5aa9ff;--r:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:14px}
+h1{font-size:20px;margin:6px 0 12px}h2{font-size:15px;margin:0 0 8px;color:var(--mut);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+button,input,select{font:inherit;color:var(--tx);background:#222a35;border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+button{cursor:pointer}button.p{background:var(--g);color:#06251c;border:0;font-weight:700}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.kpi b{display:block;font-size:26px}.kpi span{color:var(--mut);font-size:12px}
+canvas{width:100%;height:240px;display:block}
+.msg{color:var(--mut);font-size:13px;min-height:18px}.err{color:var(--r)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:right}
+td:first-child,th:first-child{text-align:left}th{color:var(--mut);font-weight:600}
+label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px;flex:1;min-width:100px}
+.hide{display:none}.leg span{margin-right:12px;font-size:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>🚴 TrainLog</h1>
+
+<div id="loginBox" class="card hide">
+  <h2>사이트 비밀번호</h2>
+  <div class="row"><input id="pw" type="password" placeholder="SITE_PASSWORD" style="flex:1"><button class="p" id="loginBtn">들어가기</button></div>
+  <div class="msg err" id="loginMsg"></div>
+</div>
+
+<div id="app" class="hide">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">오늘의 상태</h2>
+      <button id="syncBtn">🔄 동기화</button>
+    </div>
+    <div class="kpi" style="margin-top:10px">
+      <div><b id="kCtl">–</b><span>체력 CTL</span></div>
+      <div><b id="kAtl">–</b><span>피로 ATL</span></div>
+      <div><b id="kTsb">–</b><span>컨디션 TSB</span></div>
+    </div>
+    <div class="msg" id="state" style="margin-top:8px"></div>
+    <div class="msg" id="syncMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>체력 곡선 (최근 <select id="range"><option value="42">6주</option><option value="90" selected>3개월</option><option value="180">6개월</option><option value="365">1년</option></select>)</h2>
+    <canvas id="chart"></canvas>
+    <div class="leg"><span style="color:var(--b)">● CTL 체력</span><span style="color:var(--o)">● ATL 피로</span><span style="color:var(--g)">● TSB 컨디션</span></div>
+  </div>
+
+  <div class="card">
+    <h2>설정 (이 기기에만 저장돼요)</h2>
+    <div class="row">
+      <label>FTP (W)<input id="ftp" type="number" inputmode="numeric"></label>
+      <label>젖산역치 심박 LTHR<input id="lthr" type="number" inputmode="numeric"></label>
+      <label>안정시 심박<input id="hrrest" type="number" inputmode="numeric"></label>
+    </div>
+    <div class="msg">FTP가 있으면 파워 기준으로, 없는 운동(러닝 등)은 심박 기준으로 부하를 계산해요. 값을 바꾸면 모든 기록이 즉시 다시 계산돼요.</div>
+  </div>
+
+  <div class="card">
+    <h2>최근 운동</h2>
+    <table id="tbl"></table>
+  </div>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const DAY=86400000;
+
+// ---------- IndexedDB ----------
+let db;
+function openDb(){return new Promise((res,rej)=>{const r=indexedDB.open('trainlog',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('acts',{keyPath:'id'});
+  r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>rej(r.error)})}
+const tx=(m)=>db.transaction('acts',m).objectStore('acts');
+const allActs=()=>new Promise(r=>{const q=tx('readonly').getAll();q.onsuccess=()=>r(q.result)});
+const putAct=a=>new Promise(r=>{const q=tx('readwrite').put(a);q.onsuccess=()=>r()});
+
+// ---------- 설정 ----------
+const S=()=>{try{return JSON.parse(localStorage.getItem('tl_set')||'{}')}catch{return {}}};
+function loadSet(){const s=S();$('ftp').value=s.ftp||'';$('lthr').value=s.lthr||'';$('hrrest').value=s.hrrest||''}
+['ftp','lthr','hrrest'].forEach(k=>$(k).addEventListener('change',()=>{
+  const s={ftp:+$('ftp').value||0,lthr:+$('lthr').value||0,hrrest:+$('hrrest').value||0};
+  localStorage.setItem('tl_set',JSON.stringify(s));render()}));
+
+// ---------- 부하(TSS) ----------
+function tss(a,s){
+  if(a.has_power&&a.np&&s.ftp){const IF=a.np/s.ftp;return a.duration_s/3600*IF*IF*100}
+  const lthr=s.lthr||0;if(!lthr||!a.hr_hist)return 0;
+  const rest=s.hrrest||50,den=Math.max(lthr-rest,20);let sum=0;
+  for(const [hr,sec] of Object.entries(a.hr_hist)){const r=Math.max(0,(+hr-rest)/den);sum+=sec/3600*100*r*r}
+  return sum;
+}
+const dayKey=d=>{const x=new Date(d);return Date.UTC(x.getFullYear(),x.getMonth(),x.getDate())};
+function series(acts,s,days){
+  const by={};acts.forEach(a=>{const k=dayKey(a.start);by[k]=(by[k]||0)+tss(a,s)});
+  const keys=Object.keys(by).map(Number);if(!keys.length)return [];
+  const first=Math.min(...keys),today=dayKey(Date.now());
+  let ctl=0,atl=0;const out=[];
+  for(let t=first;t<=today;t+=DAY){
+    const l=by[t]||0;
+    const tsb=ctl-atl;                      // 그날 아침 컨디션 = 전날 CTL - ATL
+    ctl+=(l-ctl)/42;atl+=(l-atl)/7;
+    out.push({t,load:l,ctl,atl,tsb});
+  }
+  return out.slice(-days);
+}
+
+// ---------- 화면 ----------
+let ACTS=[];
+function stateText(tsb){
+  if(tsb>25)return'휴식이 길었어요. 컨디션은 높지만 체력이 빠지는 구간일 수 있어요.';
+  if(tsb>5)return'컨디션 좋음 — 레이스·강한 훈련에 적합한 구간이에요.';
+  if(tsb>-10)return'균형 구간 — 무난하게 훈련 중이에요.';
+  if(tsb>-30)return'피로가 쌓이는 중 — 체력을 키우는 훈련 구간이에요.';
+  return'피로 과다 — 회복을 챙기세요.';
+}
+function fmtDur(s){const h=Math.floor(s/3600),m=Math.round(s%3600/60);return h?`${h}h${String(m).padStart(2,'0')}`:`${m}m`}
+function render(){
+  const s=S(),days=+$('range').value;
+  const ser=series(ACTS,s,days);
+  if(ser.length){const l=ser[ser.length-1];
+    $('kCtl').textContent=l.ctl.toFixed(0);$('kAtl').textContent=l.atl.toFixed(0);$('kTsb').textContent=l.tsb.toFixed(0);
+    $('state').textContent=(!s.ftp&&!s.lthr)?'FTP 또는 LTHR을 설정하면 부하가 계산돼요.':stateText(l.tsb)}
+  draw(ser);
+  const rows=ACTS.slice().sort((a,b)=>b.start.localeCompare(a.start)).slice(0,25).map(a=>{
+    const d=new Date(a.start);return`<tr><td>${d.getMonth()+1}/${d.getDate()}</td><td>${a.sport==='cycling'?'🚴':a.sport==='running'?'🏃':'·'}</td>
+    <td>${(a.distance_m/1000).toFixed(1)}km</td><td>${fmtDur(a.duration_s)}</td><td>${a.np||a.avg_hr||'–'}${a.np?'W':a.avg_hr?'bpm':''}</td><td>${tss(a,s).toFixed(0)}</td></tr>`}).join('');
+  $('tbl').innerHTML='<tr><th>날짜</th><th></th><th>거리</th><th>시간</th><th>NP/심박</th><th>TSS</th></tr>'+rows;
+}
+$('range').addEventListener('change',render);
+
+function draw(ser){
+  const c=$('chart'),dpr=devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;
+  c.width=W*dpr;c.height=H*dpr;const g=c.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  if(ser.length<2){g.fillStyle='#8b97a6';g.fillText('데이터가 쌓이면 곡선이 표시돼요',12,24);return}
+  const pad={l:30,r:8,t:8,b:20};
+  const vals=ser.flatMap(p=>[p.ctl,p.atl,p.tsb]);let lo=Math.min(0,...vals),hi=Math.max(10,...vals);
+  const X=i=>pad.l+(W-pad.l-pad.r)*i/(ser.length-1),Y=v=>pad.t+(H-pad.t-pad.b)*(1-(v-lo)/(hi-lo));
+  g.strokeStyle='#2a323d';g.fillStyle='#8b97a6';g.font='11px system-ui';g.lineWidth=1;
+  const step=Math.max(10,Math.ceil((hi-lo)/5/10)*10);
+  for(let v=Math.ceil(lo/step)*step;v<=hi;v+=step){g.beginPath();g.moveTo(pad.l,Y(v));g.lineTo(W-pad.r,Y(v));g.stroke();g.fillText(v,2,Y(v)+4)}
+  [[ 'ctl','#5aa9ff'],['atl','#ffb020'],['tsb','#2dd4a0']].forEach(([k,col])=>{
+    g.strokeStyle=col;g.lineWidth=k==='ctl'?2.5:1.8;g.beginPath();
+    ser.forEach((p,i)=>i?g.lineTo(X(i),Y(p[k])):g.moveTo(X(i),Y(p[k])));g.stroke()});
+  g.fillStyle='#8b97a6';[0,Math.floor(ser.length/2),ser.length-1].forEach(i=>{
+    const d=new Date(ser[i].t);g.fillText(`${d.getUTCMonth()+1}/${d.getUTCDate()}`,Math.min(X(i),W-30),H-5)});
+}
+
+// ---------- 동기화 ----------
+async function api(path){
+  const r=await fetch(path,{credentials:'same-origin'});
+  if(r.status===401){showLogin();throw new Error('auth')}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||('오류 '+r.status));
+  return j;
+}
+let syncing=false;
+async function sync(){
+  if(syncing)return;syncing=true;$('syncBtn').disabled=true;$('syncMsg').className='msg';
+  try{
+    const have=new Set(ACTS.map(a=>a.id));
+    const first=ACTS.length===0;
+    $('syncMsg').textContent='목록 확인 중…';
+    const {items}=await api('/api/activities?limit='+(first?60:20));
+    const todo=items.filter(i=>!have.has(i.id));
+    let n=0,fail=0;
+    for(const it of todo){
+      $('syncMsg').textContent=`새 운동 가져오는 중… ${n+1}/${todo.length}`;
+      try{const a=await api('/api/activity/'+it.id);a.title=it.title;await putAct(a);ACTS.push(a);n++;render()}
+      catch(e){if(e.message==='auth')return;fail++}
+    }
+    localStorage.setItem('tl_last',Date.now());
+    $('syncMsg').textContent=todo.length?`새 운동 ${n}개 추가${fail?` (실패 ${fail})`:''}`:'새 운동 없음 — 최신 상태예요.';
+  }catch(e){if(e.message!=='auth'){$('syncMsg').className='msg err';$('syncMsg').textContent=e.message}}
+  finally{syncing=false;$('syncBtn').disabled=false;render()}
+}
+$('syncBtn').onclick=sync;
+
+// ---------- 로그인 ----------
+function showLogin(){$('loginBox').classList.remove('hide');$('app').classList.add('hide')}
+async function start(){
+  const r=await fetch('/api/me',{credentials:'same-origin'});
+  if(r.status===401){showLogin();return}
+  $('loginBox').classList.add('hide');$('app').classList.remove('hide');
+  await openDb();ACTS=await allActs();loadSet();render();sync();
+}
+$('loginBtn').onclick=async()=>{
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('pw').value})});
+  if(r.ok)start();else $('loginMsg').textContent=(await r.json().catch(()=>({}))).error||'실패';
+};
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginBtn').click()});
+addEventListener('resize',render);
+start();
+</script>
+</body>
+</html>
