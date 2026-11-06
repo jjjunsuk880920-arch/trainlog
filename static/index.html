@@ -91,7 +91,8 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px
     <div class="card">
       <h2>파워 커브 <select id="pcRange"><option value="42">최근 6주</option><option value="84" selected>최근 12주</option><option value="100000">전체</option></select></h2>
       <canvas id="pcChart" style="height:260px"></canvas>
-      <div class="leg"><span style="color:var(--g)">● 선택 기간</span><span style="color:var(--mut)">● 전체 기간</span><span style="color:var(--o)">● CP 모델</span></div>
+      <div class="leg"><span style="color:var(--g)">● 실제(선택 기간)</span><span style="color:var(--mut)">● 전체 기간</span><span style="color:var(--b)">● 기대(FTP 기준)</span><span style="color:var(--o)">● 예상(내 데이터 모델)</span></div>
+      <div id="pcInfo" class="card" style="margin:8px 0 0;background:#1d2530"></div>
       <table id="pcTbl" style="margin-top:8px"></table>
     </div>
     <div class="card">
@@ -153,15 +154,24 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px
 
   <div id="tab-run" class="hide">
     <div class="card">
-      <h2>러닝 기록 · 예상 PB</h2>
-      <div class="msg">공식 기록(대회·측정)을 알면 입력하세요. 시간은 <b>분:초</b> 또는 <b>시:분:초</b> (예: 38:46, 1:25:30). 러닝은 자전거와 완전히 따로 계산돼요.</div>
-      <table id="runTbl" style="margin-top:8px"></table>
+      <h2>러닝 기록</h2>
+      <div class="msg">공식 기록(대회·측정)을 입력하세요. 형식: <b>38:46</b> 또는 <b>1:25:30</b> (분:초 / 시:분:초). 입력하면 바로 저장돼요.</div>
+      <table id="runRec" style="margin-top:8px"></table>
+      <div id="pbMsg" class="sub"></div>
+    </div>
+    <div class="card">
+      <h2>예상 PB</h2>
+      <table id="runPred"></table>
       <div id="runNote" class="sub"></div>
     </div>
     <div class="card">
-      <h2>러닝 설정</h2>
-      <div class="row"><label>러닝 젖산역치 심박<input id="runLthr" type="number" inputmode="numeric" placeholder="자동 추정"></label></div>
-      <div class="sub">러닝 부하(TSS)는 심박 기준으로 계산해요. 비워두면 최근 러닝의 최고 심박으로 추정해요.</div>
+      <h2>내 러닝 데이터 (심박 분석)</h2>
+      <div id="runHr" class="msg"></div>
+      <div class="row" style="margin-top:8px">
+        <label>최대 심박<input id="runHrmax" type="number" inputmode="numeric" placeholder="자동"></label>
+        <label>러닝 젖산역치 심박<input id="runLthr" type="number" inputmode="numeric" placeholder="자동 추정"></label>
+      </div>
+      <div class="sub">최대 심박은 비우면 러닝 기록 중 가장 높은 값을 써요(센서 오류가 의심되면 직접 입력). 러닝 부하(TSS)는 심박 기준이에요.</div>
     </div>
     <div class="card">
       <h2>최근 러닝</h2>
@@ -353,9 +363,10 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
 
 // 설정 입력(체중 등)
 $('runLthr').addEventListener('change',()=>{SET('runLthr',+$('runLthr').value||0);render()});
+$('runHrmax').addEventListener('change',()=>{SET('runHrmax',+$('runHrmax').value||0);render()});
 ['weight','sWeight'].forEach(id=>$(id).addEventListener('change',()=>{SET('weight',+$(id).value||0);$('weight').value=$('sWeight').value=S().weight||'';render()}));
 $('sPower').addEventListener('change',()=>SET('simPower',+$('sPower').value||0));
-const _loadSet=loadSet;loadSet=function(){_loadSet();const s=S();$('runLthr').value=s.runLthr||'';$('weight').value=$('sWeight').value=s.weight||'';$('sPower').value=s.simPower||s.ftp||''};
+const _loadSet=loadSet;loadSet=function(){_loadSet();const s=S();$('runLthr').value=s.runLthr||'';$('runHrmax').value=s.runHrmax||'';$('weight').value=$('sWeight').value=s.weight||'';$('sPower').value=s.simPower||s.ftp||''};
 
 // ---------- 파워 커브 ----------
 const DURS=[1,5,10,30,60,120,180,240,300,420,480,600,900,1200,1800,2400,3600];
@@ -394,20 +405,37 @@ function lineChart(cv,lines,o){
   const x0=fx(Math.min(...pts.map(p=>p.x))),x1=fx(Math.max(...pts.map(p=>p.x)));
   let y0=o.y0!=null?o.y0:Math.min(...pts.map(p=>p.y)),y1=Math.max(...pts.map(p=>p.y))*1.05;
   const X=x=>pad.l+(W-pad.l-pad.r)*(fx(x)-x0)/((x1-x0)||1),Y=y=>pad.t+(H-pad.t-pad.b)*(1-(y-y0)/((y1-y0)||1));
+  cv._m={x0,x1,l:pad.l,r:pad.r};
   g.strokeStyle='#2a323d';g.fillStyle='#8b97a6';g.font='11px system-ui';g.lineWidth=1;
   const step=Math.max(1,Math.pow(10,Math.floor(Math.log10((y1-y0)/4))))*(((y1-y0)/4)/Math.pow(10,Math.floor(Math.log10((y1-y0)/4)))>3?5:((y1-y0)/4)/Math.pow(10,Math.floor(Math.log10((y1-y0)/4)))>1.5?2:1);
   for(let v=Math.ceil(y0/step)*step;v<=y1;v+=step){g.beginPath();g.moveTo(pad.l,Y(v));g.lineTo(W-pad.r,Y(v));g.stroke();g.fillText(Math.round(v),2,Y(v)+4)}
   (o.xt||[]).forEach(x=>{if(fx(x)>=x0&&fx(x)<=x1)g.fillText(o.fmtx(x),Math.min(X(x)-8,W-30),H-6)});
   lines.forEach(l=>{g.strokeStyle=l.c;g.lineWidth=l.w||2;g.setLineDash(l.dash||[]);g.beginPath();l.pts.forEach((p,i)=>i?g.lineTo(X(p.x),Y(p.y)):g.moveTo(X(p.x),Y(p.y)));g.stroke();g.setLineDash([])});
+  if(o.sel){const sx=X(o.sel);g.strokeStyle='#e8edf3';g.lineWidth=1;g.setLineDash([3,3]);g.beginPath();g.moveTo(sx,pad.t);g.lineTo(sx,H-pad.b);g.stroke();g.setLineDash([]);
+    lines.forEach(l=>{const p=l.pts.find(q=>q.x===o.sel);if(p){g.fillStyle=l.c;g.beginPath();g.arc(X(p.x),Y(p.y),4,0,7);g.fill()}})}
 }
+let PCSEL=0;
 function renderPower(){
   if($('tab-power').classList.contains('hide'))return;
   const s=S(),days=+$('pcRange').value,since=Date.now()-days*DAY;
   const cur=bestCurve(since),all=bestCurve(0),cp=cpFit(cur);
+  const ftpU=S2().ftp||0,WP=20000;
+  const expF=d=>ftpU&&d>=120?ftpU+WP/d:null,preF=d=>cp&&d>=180?cp.cp+cp.wp/d:null;
   const lines=[{c:'#8b97a6',w:1.5,pts:DURS.filter(d=>all[d]).map(d=>({x:d,y:all[d]}))},
                {c:'#2dd4a0',w:2.5,pts:DURS.filter(d=>cur[d]).map(d=>({x:d,y:cur[d]}))}];
-  if(cp)lines.push({c:'#ffb020',w:1.5,dash:[5,4],pts:[...DURS.filter(d=>d>=120)].map(d=>({x:d,y:cp.cp+cp.wp/d}))});
-  lineChart($('pcChart'),lines,{logx:true,y0:0,xt:[1,10,60,300,1200,3600],fmtx:durLabel});
+  if(ftpU)lines.push({c:'#5aa9ff',w:1.5,dash:[5,4],pts:DURS.filter(d=>d>=120).map(d=>({x:d,y:expF(d)}))});
+  if(cp)lines.push({c:'#ffb020',w:1.5,dash:[2,3],pts:DURS.filter(d=>d>=180).map(d=>({x:d,y:preF(d)}))});
+  if(!PCSEL)PCSEL=cur[300]?300:(DURS.find(d=>cur[d])||300);
+  lineChart($('pcChart'),lines,{logx:true,y0:0,xt:[1,10,60,300,1200,3600],fmtx:durLabel,sel:PCSEL});
+  {const d=PCSEL,a=cur[d],e=expF(d),p=preF(d),kg0=s.weight||0,pc=v=>ftpU&&v?` · FTP의 ${Math.round(v/ftpU*100)}%`:'',wk=v=>kg0&&v?` · ${(v/kg0).toFixed(2)}W/kg`:'';
+   let t=`<b>${durLabel(d)}</b> <span class="sub">(그래프를 눌러 구간을 바꿔 보세요)</span><table style="margin-top:6px">`;
+   t+=`<tr><td class="l" style="color:var(--g)">실제 내 기록</td><td>${a?a+'W'+pc(a)+wk(a):'기록 없음'}</td></tr>`;
+   t+=`<tr><td class="l" style="color:var(--b)">기대 (FTP ${ftpU||'?'}W 기준)</td><td>${e?Math.round(e)+'W'+pc(e)+wk(e):'–'}</td></tr>`;
+   t+=`<tr><td class="l" style="color:var(--o)">예상 (내 데이터 모델)</td><td>${p?Math.round(p)+'W'+pc(p)+wk(p):'–'}</td></tr></table>`;
+   if(a&&e){const df=(a/e-1)*100;t+=`<div class="sub">${durLabel(d)} 실제 기록은 FTP 기준 기대값보다 ${df>=0?'+':''}${df.toFixed(0)}%예요. ${df<-8?'이 구간은 아직 힘껏 낸 기록이 없거나 약점일 수 있어요.':df>8?'이 구간이 강점이에요(FTP 대비 잘 내는 편).':'FTP와 균형이 맞아요.'}`+`</div>`}
+   else if(!a&&(e||p)){t+=`<div class="sub">기록은 없지만 ${e?`FTP 기준으로는 약 ${Math.round(e)}W`:''}${e&&p?', ':''}${p?`내 모델로는 약 ${Math.round(p)}W`:''}까지 낼 수 있을 거예요.</div>`}
+   t+='<div class="sub">기대: FTP+W′(20kJ) 공식(2분 이상). 예상: 내 3~20분 기록으로 맞춘 임계파워 모델.</div>';
+   $('pcInfo').innerHTML=t}
   const kg=s.weight||0;
   $('pcTbl').innerHTML='<tr><th class="l">구간</th><th>선택 기간</th>'+(kg?'<th>W/kg</th>':'')+'<th>전체</th></tr>'+
     [1,5,30,60,300,600,1200,3600].map(d=>`<tr><td class="l">${durLabel(d)}</td><td>${cur[d]||'–'}${cur[d]?'W':''}</td>${kg?`<td>${cur[d]?(cur[d]/kg).toFixed(2):'–'}</td>`:''}<td>${all[d]||'–'}${all[d]?'W':''}</td></tr>`).join('');
@@ -439,6 +467,10 @@ function renderPower(){
   $('zones').innerHTML=Z.map((z,i)=>`<tr><td class="l">${z[0]}<div class="sub">${Math.round(z[1]*ftp)}${z[2]>9?'+':'–'+Math.round(z[2]*ftp)}W</div></td><td class="l"><span class="bar" style="width:${Math.round(t[i]/tot*100*1.4)}px"></span> ${(t[i]/tot*100).toFixed(0)}%</td><td>${fmtDur(t[i])}</td></tr>`).join('');
 }
 $('pcRange').addEventListener('change',renderPower);
+$('pcChart').addEventListener('pointerdown',e=>{
+  const cv=e.currentTarget,m=cv._m;if(!m)return;const r=cv.getBoundingClientRect();
+  const f=Math.max(0,Math.min(1,(e.clientX-r.left-m.l)/(r.width-m.l-m.r))),lx=m.x0+f*(m.x1-m.x0);
+  let best=DURS[0],bd=1e9;DURS.forEach(d=>{const dd=Math.abs(Math.log(d)-lx);if(dd<bd){bd=dd;best=d}});PCSEL=best;renderPower()});
 
 // ---------- 주간 훈련량 ----------
 function renderWeekly(){
@@ -538,28 +570,64 @@ $('simBtn').onclick=()=>{
 
 // ---------- 러닝 (자전거와 완전히 분리) ----------
 const RD=[[1000,'1km'],[3000,'3km'],[5000,'5km'],[10000,'10km'],[21097,'하프'],[42195,'풀']];
-const parseT=v=>{const p=String(v).trim().split(':').map(Number);if(!v||p.some(x=>isNaN(x)))return 0;return p.length===3?p[0]*3600+p[1]*60+p[2]:p.length===2?p[0]*60+p[1]:0};
+const RACE_HR={5000:0.95,10000:0.92,21097:0.89,42195:0.85};   // 대회 평균 심박 ≈ 최대심박의 비율(일반적 범위)
+const parseT=v=>{v=String(v).trim().replace(/[분시]/g,':').replace(/초/g,'').replace(/\s+/g,'');if(!v)return 0;const p=v.split(':').filter(x=>x!=='').map(Number);if(!p.length||p.length>3||p.some(x=>isNaN(x)||x<0))return 0;return p.length===3?p[0]*3600+p[1]*60+p[2]:p.length===2?p[0]*60+p[1]:p[0]*60};
 const paceOf=(t,d)=>{const s=t/(d/1000);return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}/km`};
+function buildRunRec(){ // 입력칸은 한 번만 만든다(다시 그리면 입력 중인 글자가 지워지므로)
+  const tb=$('runRec');if(tb.dataset.built)return;tb.dataset.built=1;
+  tb.innerHTML='<tr><th class="l">거리</th><th>공식 기록</th><th>훈련 로그 최고 구간</th></tr>'+RD.map(([d,l])=>`<tr><td class="l">${l}</td><td><input class="pbIn" data-d="${d}" placeholder="-" style="width:90px;text-align:right;padding:6px"></td><td id="rl-${d}">–</td></tr>`).join('');
+  document.querySelectorAll('.pbIn').forEach(el=>{
+    const save=()=>{const raw=el.value.trim(),o={...(S().pb||{})};
+      if(!raw){delete o[el.dataset.d];el.style.borderColor='';$('pbMsg').textContent=''}
+      else{const t=parseT(raw);if(!t||t<60){el.style.borderColor='var(--r)';$('pbMsg').innerHTML='<span class="err">형식을 확인하세요. 예: 38:46 / 1:25:30</span>';return}
+        o[el.dataset.d]=t;el.style.borderColor='var(--g)';$('pbMsg').textContent=''}
+      SET('pb',o);renderRun()};
+    el.addEventListener('change',save);el.addEventListener('input',()=>{if(parseT(el.value)>=60)save()});
+  });
+}
+function hrModel(runs,hrmax,rest){ // 심박-속도 관계 회귀: 속도 = a + b·심박
+  const pts=runs.filter(a=>a.avg_hr&&a.distance_m>=3000&&a.duration_s>=900&&a.duration_s<=14400).map(a=>({hr:a.avg_hr,v:a.distance_m/a.duration_s})).filter(p=>p.v>1.5&&p.v<6.5&&p.hr>rest+20&&p.hr<=hrmax+5);
+  if(pts.length<3)return null;
+  const n=pts.length,mh=pts.reduce((a,p)=>a+p.hr,0)/n,mv=pts.reduce((a,p)=>a+p.v,0)/n;
+  let sxy=0,sxx=0,syy=0;pts.forEach(p=>{sxy+=(p.hr-mh)*(p.v-mv);sxx+=(p.hr-mh)**2;syy+=(p.v-mv)**2});
+  const spread=Math.sqrt(sxx/n);let a,b,mode;
+  if(n>=5&&spread>=4&&sxy>0){b=sxy/sxx;a=mv-b*mh;mode='회귀'}
+  else{const c=pts.map(p=>p.v/(p.hr-rest)).sort((x,y)=>x-y)[Math.floor(n/2)];a=-c*rest;b=c;mode='비례'}   // 심박예비량에 속도가 비례한다고 가정
+  const r2=mode==='회귀'&&syy?(sxy*sxy)/(sxx*syy):0;
+  return {a,b,n,mode,r2,maxHr:Math.max(...pts.map(p=>p.hr)),maxV:Math.max(...pts.map(p=>p.v))};
+}
 function renderRun(){
+  buildRunRec();
   if($('tab-run').classList.contains('hide'))return;
-  const runs=ACTS.filter(isRun),now=Date.now(),pb=S().pb||{};
+  const runs=ACTS.filter(isRun),now=Date.now(),pb=S().pb||{},s=S();
+  document.querySelectorAll('.pbIn').forEach(el=>{if(document.activeElement!==el){const v=pb[el.dataset.d];el.value=v?fmtT(v):''}});
   const bestOf=from=>{const o={};runs.forEach(a=>{if(!a.best_time||new Date(a.start).getTime()<from)return;for(const [d,t] of Object.entries(a.best_time))if(!o[d]||t<o[d].t)o[d]={t,date:a.start}});return o};
   const log=bestOf(0),rec=bestOf(now-120*DAY);
-  // 예측 근거: 최근 120일 로그 최고 구간 + 내가 입력한 공식 기록
+  RD.forEach(([d])=>{const c=$('rl-'+d),l=log[d];c.innerHTML=l?`${fmtT(l.t)}<div class="sub">${paceOf(l.t,d)}</div>`:'–'});
+  // (A) 기록 기반: 리겔 공식 (최근 120일 로그 최고 구간 + 공식 기록)
   const src=[];RD.forEach(([d])=>{if(rec[d])src.push({d,t:rec[d].t,k:'로그'});if(pb[d])src.push({d,t:pb[d],k:'공식'})});
-  const pred=D=>{let best=null;src.forEach(s=>{const lo=D>21097?0.2:0.3;if(s.d<lo*D||s.d>2.1*D)return;
-      const k=(D>21097&&s.d<15000)?1.10:1.06;const t=s.t*Math.pow(D/s.d,k);if(!best||t<best.t)best={t,s}});return best};
-  $('runTbl').innerHTML='<tr><th class="l">거리</th><th>공식 기록 입력</th><th>로그 최고 구간</th><th>예상 PB</th></tr>'+RD.map(([d,l])=>{
-    const p=pred(d),lg=log[d];
-    return `<tr><td class="l">${l}</td><td><input class="pbIn" data-d="${d}" value="${pb[d]?fmtT(pb[d]):''}" placeholder="-" style="width:80px;text-align:right;padding:5px"></td>
-    <td>${lg?fmtT(lg.t)+'<div class="sub">'+paceOf(lg.t,d)+'</div>':'–'}</td>
-    <td>${p?'<b>'+fmtT(p.t)+'</b><div class="sub">'+paceOf(p.t,d)+' · '+(RD.find(x=>x[0]===p.s.d)[1])+' '+p.s.k+' 기준</div>':'–'}</td></tr>`}).join('');
-  document.querySelectorAll('.pbIn').forEach(el=>el.onchange=()=>{const o={...(S().pb||{})};const t=parseT(el.value);if(t)o[el.dataset.d]=t;else delete o[el.dataset.d];SET('pb',o);setTimeout(renderRun,0)});
-  // 주간 러닝 거리로 하프/풀 경고
+  const riegel=D=>{let best=null;src.forEach(x=>{const lo=D>21097?0.2:0.3;if(x.d<lo*D||x.d>2.1*D)return;
+      const k=(D>21097&&x.d<15000)?1.10:1.06;const t=x.t*Math.pow(D/x.d,k);if(!best||t<best.t)best={t,s:x}});return best};
+  // (B) 심박 기반: 최근 120일 러닝의 (심박, 속도) 관계에서 대회 강도 심박일 때의 속도
+  const recent=runs.filter(a=>new Date(a.start).getTime()>now-120*DAY);
+  const hrs=runs.map(a=>a.max_hr||0).filter(x=>x>0&&x<=215);
+  const hrmax=s.runHrmax||(hrs.length?Math.max(...hrs):0),rest=s.hrrest||50;
+  const M=hrmax?hrModel(recent,hrmax,rest):null;
+  const byHr=D=>{if(!M||!RACE_HR[D])return null;const hr=hrmax*RACE_HR[D],v=M.a+M.b*hr;if(!(v>1.5))return null;
+    return {t:D/v,ex:hr>M.maxHr*1.04}};
+  $('runPred').innerHTML='<tr><th class="l">거리</th><th>종합 예상 PB</th><th>기록 기준</th><th>심박 기준</th></tr>'+RD.map(([d,l])=>{
+    const a=riegel(d),b=byHr(d);let tot=null;if(a&&b)tot=a.t*0.5+b.t*0.5;else if(a)tot=a.t;else if(b)tot=b.t;
+    return `<tr><td class="l">${l}</td><td>${tot?'<b>'+fmtT(tot)+'</b><div class="sub">'+paceOf(tot,d)+'</div>':'–'}</td>
+      <td>${a?fmtT(a.t)+'<div class="sub">'+(RD.find(x=>x[0]===a.s.d)[1])+' '+a.s.k+'</div>':'–'}</td>
+      <td>${b?fmtT(b.t)+(b.ex?'<div class="sub" style="color:var(--o)">외삽</div>':''):'–'}</td></tr>`}).join('');
   const wk=runs.filter(a=>new Date(a.start).getTime()>now-56*DAY).reduce((a,b)=>a+b.distance_m,0)/1000/8;
-  $('runNote').innerHTML=`최근 8주 주당 러닝 ${wk.toFixed(0)}km. 예상 PB는 리겔 공식(거리가 2배가 되면 시간은 약 2.08배)으로 계산했어요. 로그 최고 구간은 훈련 중 가장 빠른 구간이라 대회 기록보다 느리거나 빠를 수 있어요.`
-    +(wk<30?' <span style="color:var(--o)">주간 거리가 적어서 하프·풀 예상은 낙관적일 수 있어요.</span>':'');
-  $('runList').innerHTML='<tr><th class="l">날짜</th><th>거리</th><th>시간</th><th>페이스</th><th>심박</th></tr>'+runs.slice().sort((a,b)=>b.start.localeCompare(a.start)).slice(0,15).map(a=>{const d=new Date(a.start);return`<tr><td class="l">${d.getMonth()+1}/${d.getDate()}</td><td>${(a.distance_m/1000).toFixed(1)}km</td><td>${fmtDur(a.duration_s)}</td><td>${a.distance_m?paceOf(a.duration_s,a.distance_m):'–'}</td><td>${a.avg_hr||'–'}</td></tr>`}).join('');
+  $('runNote').innerHTML='종합 = 기록 기준과 심박 기준의 평균(둘 중 하나만 있으면 그 값). 기록 기준은 리겔 공식, 심박 기준은 내 러닝의 심박-속도 관계에 대회 강도 심박(최대심박의 5km 95%·10km 92%·하프 89%·풀 85%)을 넣어 계산해요. 1km는 심박 예측이 어려워 기록 기준만 써요.'
+    +` 최근 8주 주당 ${wk.toFixed(0)}km.`+(wk<30?' <span style="color:var(--o)">주간 거리가 적어서 하프·풀 예상은 낙관적일 수 있어요.</span>':'');
+  $('runHr').innerHTML=!runs.length?'러닝 기록이 없어요.':
+    `최대 심박 <b>${hrmax||'–'}</b> bpm${s.runHrmax?' (직접 입력)':' (러닝 기록 최고값)'} · 분석에 쓴 러닝 ${M?M.n:0}회(최근 120일)`
+    +(M?` · 관계식 ${M.mode}${M.mode==='회귀'?` (설명력 R² ${M.r2.toFixed(2)})`:' (기록이 적어 단순 비례로 계산)'}`:' · 3km 이상 15분+ 러닝이 3회 이상, 심박 기록이 필요해요')
+    +(M&&M.maxHr?`. 최근 러닝 평균 심박 최고 ${M.maxHr}bpm, 최고 평균 속도 ${paceOf(1000/M.maxV,1000)}`:'');
+  $('runList').innerHTML='<tr><th class="l">날짜</th><th>거리</th><th>시간</th><th>페이스</th><th>평균/최대 심박</th></tr>'+runs.slice().sort((a,b)=>b.start.localeCompare(a.start)).slice(0,15).map(a=>{const d=new Date(a.start);return`<tr><td class="l">${d.getMonth()+1}/${d.getDate()}</td><td>${(a.distance_m/1000).toFixed(1)}km</td><td>${fmtDur(a.duration_s)}</td><td>${a.distance_m?paceOf(a.duration_s,a.distance_m):'–'}</td><td>${a.avg_hr||'–'}/${a.max_hr||'–'}</td></tr>`}).join('');
 }
 
 // ---------- 훈련 밸런스 리포트 ----------
