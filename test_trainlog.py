@@ -115,3 +115,13 @@ assert t.get("/api/me").json["source"] == "igpsport"
 assert t.get("/api/activities").json["items"][0]["id"] == 11
 assert t.get("/api/activity/11").json["np"]
 print("ALL OK 3")
+
+# ---- 확장 요약(구간별 파워, 러닝 최고기록) ----
+t0 = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+rs = [{"t": t0+dt.timedelta(seconds=i), "hr": 165, "p": None, "cad": None, "spd": None, "alt": None, "dist": i*(1000/210)} for i in range(2400)]
+rd = fitstats.summarize(rs, {"sport": "running"})
+assert abs(rd["best_time"]["5000"]-1050) <= 2 and rd["v"] == 2, rd
+ps = [{"t": t0+dt.timedelta(seconds=i), "hr": 140, "p": (400 if i < 5 else 200), "cad": None, "spd": None, "alt": None, "dist": i*8.0} for i in range(4000)]
+pd_ = fitstats.summarize(ps, {"sport": "cycling"})
+assert pd_["best_power"]["1"] == 400 and pd_["best_power"]["3600"] == 200 and pd_["best_time"] == {}, pd_
+print("ALL OK 4")

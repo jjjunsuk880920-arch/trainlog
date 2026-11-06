@@ -20,7 +20,9 @@ canvas{width:100%;height:240px;display:block}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:right}
 td:first-child,th:first-child{text-align:left}th{color:var(--mut);font-weight:600}
 label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px;flex:1;min-width:100px}
-.hide{display:none}.leg span{margin-right:12px;font-size:12px}
+.hide{display:none}.tabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto}.tabs button{flex:1;white-space:nowrap}.tabs button.on{background:var(--g);color:#06251c;border:0;font-weight:700}
+.sub{color:var(--mut);font-size:12px;margin-top:6px}.big{font-size:22px;font-weight:700}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bar{height:14px;border-radius:4px;background:var(--b);display:inline-block;vertical-align:middle}td.l,th.l{text-align:left}.leg span{margin-right:12px;font-size:12px}
 </style>
 </head>
 <body>
@@ -34,6 +36,8 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px
 </div>
 
 <div id="app" class="hide">
+  <div class="tabs" id="tabs"><button data-t="home" class="on">홈</button><button data-t="power">파워</button><button data-t="sim">시뮬레이션</button><button data-t="run">러닝</button></div>
+  <div id="tab-home">
   <div class="card">
     <div class="row" style="justify-content:space-between">
       <h2 style="margin:0">오늘의 상태</h2>
@@ -66,8 +70,73 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px
   </div>
 
   <div class="card">
+    <h2>주간 훈련량 (최근 8주)</h2>
+    <table id="wk"></table>
+  </div>
+
+  <div class="card">
     <h2>최근 운동</h2>
     <table id="tbl"></table>
+  </div>
+  </div>
+
+  <div id="tab-power" class="hide">
+    <div class="card">
+      <h2>파워 커브 <select id="pcRange"><option value="42">최근 6주</option><option value="84" selected>최근 12주</option><option value="100000">전체</option></select></h2>
+      <canvas id="pcChart" style="height:260px"></canvas>
+      <div class="leg"><span style="color:var(--g)">● 선택 기간</span><span style="color:var(--mut)">● 전체 기간</span><span style="color:var(--o)">● CP 모델</span></div>
+      <table id="pcTbl" style="margin-top:8px"></table>
+    </div>
+    <div class="card">
+      <h2>FTP 추정</h2>
+      <div id="ftpBox" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>체중 · VO2max 추정</h2>
+      <div class="row"><label>체중 (kg)<input id="weight" type="number" inputmode="decimal"></label></div>
+      <div id="vo2Box" class="msg" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>파워 존 시간 (선택 기간, 7존)</h2>
+      <table id="zones"></table>
+    </div>
+  </div>
+
+  <div id="tab-sim" class="hide">
+    <div class="card">
+      <h2>코스 시뮬레이션</h2>
+      <div class="msg">GPX 파일을 고르면 내 파워로 완주 시간을 계산해요. GPXTo에서 만든 경로도 돼요.</div>
+      <div class="row" style="margin-top:8px"><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml,text/xml"></div>
+      <div class="row" style="margin-top:8px">
+        <label>평균 파워 (W)<input id="sPower" type="number" inputmode="numeric"></label>
+        <label>체중 (kg)<input id="sWeight" type="number" inputmode="decimal"></label>
+        <label>자전거+짐 (kg)<input id="sBike" type="number" inputmode="decimal" value="9"></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>CdA (m²)<input id="sCda" type="number" step="0.01" value="0.34"></label>
+        <label>Crr (구름저항)<input id="sCrr" type="number" step="0.001" value="0.005"></label>
+        <label>목표 시간 (분, 선택)<input id="sTarget" type="number" inputmode="numeric" placeholder="예: 90"></label>
+      </div>
+      <button class="p" id="simBtn" style="margin-top:10px">계산</button>
+      <div id="simOut" style="margin-top:10px"></div>
+      <canvas id="simChart" style="height:180px;margin-top:8px"></canvas>
+    </div>
+  </div>
+
+  <div id="tab-run" class="hide">
+    <div class="card">
+      <h2>러닝 최고 기록 (운동 중 가장 빠른 구간)</h2>
+      <table id="runBest"></table>
+      <div class="sub">한 번의 운동 안에서 가장 빠른 구간이에요. 대회 공식 기록과는 다를 수 있어요.</div>
+    </div>
+    <div class="card">
+      <h2>기록 예측 (Riegel 공식)</h2>
+      <div id="riegel" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>최근 러닝</h2>
+      <table id="runList"></table>
+    </div>
   </div>
 </div>
 </main>
@@ -89,7 +158,7 @@ const putAct=a=>new Promise(r=>{const q=tx('readwrite').put(a);q.onsuccess=()=>r
 const S=()=>{try{return JSON.parse(localStorage.getItem('tl_set')||'{}')}catch{return {}}};
 function loadSet(){const s=S();$('ftp').value=s.ftp||'';$('lthr').value=s.lthr||'';$('hrrest').value=s.hrrest||''}
 ['ftp','lthr','hrrest'].forEach(k=>$(k).addEventListener('change',()=>{
-  const s={ftp:+$('ftp').value||0,lthr:+$('lthr').value||0,hrrest:+$('hrrest').value||0};
+  const s={...S(),ftp:+$('ftp').value||0,lthr:+$('lthr').value||0,hrrest:+$('hrrest').value||0};
   localStorage.setItem('tl_set',JSON.stringify(s));render()}));
 
 // ---------- 부하(TSS) ----------
@@ -137,7 +206,7 @@ function render(){
     <td>${(a.distance_m/1000).toFixed(1)}km</td><td>${fmtDur(a.duration_s)}</td><td>${a.np||a.avg_hr||'–'}${a.np?'W':a.avg_hr?'bpm':''}</td><td>${tss(a,s).toFixed(0)}</td></tr>`}).join('');
   $('tbl').innerHTML='<tr><th>날짜</th><th></th><th>거리</th><th>시간</th><th>NP/심박</th><th>TSS</th></tr>'+rows;
 }
-$('range').addEventListener('change',render);
+$('range').addEventListener('change',()=>render());
 
 function draw(ser){
   const c=$('chart'),dpr=devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;
@@ -171,14 +240,15 @@ async function sync(){
   if(syncing)return;syncing=true;$('syncBtn').disabled=true;$('syncMsg').className='msg';
   try{
     const have=new Set(ACTS.map(a=>a.id));
+    const stale=new Set(ACTS.filter(a=>a.v!==2).map(a=>a.id));
     const first=ACTS.length===0;
     $('syncMsg').textContent='목록 확인 중…';
-    const {items}=await api('/api/activities?limit='+(first?60:20));
-    const todo=items.filter(i=>!have.has(i.id));
+    const {items}=await api('/api/activities?limit='+((first||stale.size)?100:20));
+    const todo=items.filter(i=>!have.has(i.id)||stale.has(i.id));
     let n=0,fail=0;
     for(const it of todo){
       $('syncMsg').textContent=`새 운동 가져오는 중… ${n+1}/${todo.length}`;
-      try{const a=await api('/api/activity/'+it.id);a.title=it.title;await putAct(a);ACTS.push(a);n++;render()}
+      try{const a=await api('/api/activity/'+it.id);a.title=it.title;await putAct(a);const ix=ACTS.findIndex(x=>x.id===a.id);if(ix>=0)ACTS[ix]=a;else ACTS.push(a);n++;render()}
       catch(e){if(e.message==='auth')return;fail++}
     }
     localStorage.setItem('tl_last',Date.now());
@@ -204,8 +274,173 @@ $('loginBtn').onclick=async()=>{
   if(r.ok)start();else $('loginMsg').textContent=(await r.json().catch(()=>({}))).error||'실패';
 };
 $('pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginBtn').click()});
-addEventListener('resize',render);
+addEventListener('resize',()=>render());
 start();
+</script>
+
+<script>
+// ================= 확장 기능 (파워 커브 · FTP 추정 · 존 · 시뮬레이션 · 러닝) =================
+const SET=(k,v)=>{const s=S();s[k]=v;localStorage.setItem('tl_set',JSON.stringify(s))};
+const fmtT=s=>{s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`:`${m}:${String(x).padStart(2,'0')}`};
+const durLabel=d=>d<60?d+'초':d<3600?(d/60)+'분':(d/3600)+'시간';
+
+// 탭
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  ['home','power','sim','run'].forEach(t=>$('tab-'+t).classList.toggle('hide',t!==b.dataset.t));
+  render();
+});
+
+// 설정 입력(체중 등)
+['weight','sWeight'].forEach(id=>$(id).addEventListener('change',()=>{SET('weight',+$(id).value||0);$('weight').value=$('sWeight').value=S().weight||'';render()}));
+$('sPower').addEventListener('change',()=>SET('simPower',+$('sPower').value||0));
+const _loadSet=loadSet;loadSet=function(){_loadSet();const s=S();$('weight').value=$('sWeight').value=s.weight||'';$('sPower').value=s.simPower||s.ftp||''};
+
+// ---------- 파워 커브 ----------
+const DURS=[1,5,10,30,60,120,180,300,480,600,900,1200,1800,2400,3600];
+function bestCurve(since){
+  const out={};ACTS.forEach(a=>{if(!a.best_power||new Date(a.start).getTime()<since)return;
+    for(const [d,w] of Object.entries(a.best_power))out[d]=Math.max(out[d]||0,w)});
+  // 긴 구간 값이 짧은 구간보다 클 수 없게 보정
+  let m=Infinity;DURS.forEach(d=>{if(out[d]!=null){out[d]=Math.min(out[d],m);m=out[d]}});return out;
+}
+function cpFit(c){ // 임계 파워(CP)·W' : 일(J) = CP·t + W'
+  const ds=[180,300,600,1200].filter(d=>c[d]);if(ds.length<3)return null;
+  const xs=ds,ys=ds.map(d=>c[d]*d),n=xs.length,mx=xs.reduce((a,b)=>a+b)/n,my=ys.reduce((a,b)=>a+b)/n;
+  let sxy=0,sxx=0;xs.forEach((x,i)=>{sxy+=(x-mx)*(ys[i]-my);sxx+=(x-mx)**2});
+  const cp=sxy/sxx,wp=my-cp*mx;return cp>50&&wp>0?{cp,wp}:null;
+}
+function lineChart(cv,lines,o){
+  const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
+  const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const pts=lines.flatMap(l=>l.pts);if(pts.length<2){g.fillStyle='#8b97a6';g.fillText('데이터가 쌓이면 표시돼요',12,24);return}
+  const pad={l:34,r:8,t:8,b:22};const fx=o.logx?Math.log:(v=>v);
+  const x0=fx(Math.min(...pts.map(p=>p.x))),x1=fx(Math.max(...pts.map(p=>p.x)));
+  let y0=o.y0!=null?o.y0:Math.min(...pts.map(p=>p.y)),y1=Math.max(...pts.map(p=>p.y))*1.05;
+  const X=x=>pad.l+(W-pad.l-pad.r)*(fx(x)-x0)/((x1-x0)||1),Y=y=>pad.t+(H-pad.t-pad.b)*(1-(y-y0)/((y1-y0)||1));
+  g.strokeStyle='#2a323d';g.fillStyle='#8b97a6';g.font='11px system-ui';g.lineWidth=1;
+  const step=Math.max(1,Math.pow(10,Math.floor(Math.log10((y1-y0)/4))))*(((y1-y0)/4)/Math.pow(10,Math.floor(Math.log10((y1-y0)/4)))>3?5:((y1-y0)/4)/Math.pow(10,Math.floor(Math.log10((y1-y0)/4)))>1.5?2:1);
+  for(let v=Math.ceil(y0/step)*step;v<=y1;v+=step){g.beginPath();g.moveTo(pad.l,Y(v));g.lineTo(W-pad.r,Y(v));g.stroke();g.fillText(Math.round(v),2,Y(v)+4)}
+  (o.xt||[]).forEach(x=>{if(fx(x)>=x0&&fx(x)<=x1)g.fillText(o.fmtx(x),Math.min(X(x)-8,W-30),H-6)});
+  lines.forEach(l=>{g.strokeStyle=l.c;g.lineWidth=l.w||2;g.setLineDash(l.dash||[]);g.beginPath();l.pts.forEach((p,i)=>i?g.lineTo(X(p.x),Y(p.y)):g.moveTo(X(p.x),Y(p.y)));g.stroke();g.setLineDash([])});
+}
+function renderPower(){
+  if($('tab-power').classList.contains('hide'))return;
+  const s=S(),days=+$('pcRange').value,since=Date.now()-days*DAY;
+  const cur=bestCurve(since),all=bestCurve(0),cp=cpFit(cur);
+  const lines=[{c:'#8b97a6',w:1.5,pts:DURS.filter(d=>all[d]).map(d=>({x:d,y:all[d]}))},
+               {c:'#2dd4a0',w:2.5,pts:DURS.filter(d=>cur[d]).map(d=>({x:d,y:cur[d]}))}];
+  if(cp)lines.push({c:'#ffb020',w:1.5,dash:[5,4],pts:[...DURS.filter(d=>d>=120)].map(d=>({x:d,y:cp.cp+cp.wp/d}))});
+  lineChart($('pcChart'),lines,{logx:true,y0:0,xt:[1,10,60,300,1200,3600],fmtx:durLabel});
+  const kg=s.weight||0;
+  $('pcTbl').innerHTML='<tr><th class="l">구간</th><th>선택 기간</th>'+(kg?'<th>W/kg</th>':'')+'<th>전체</th></tr>'+
+    [1,5,30,60,300,600,1200,3600].map(d=>`<tr><td class="l">${durLabel(d)}</td><td>${cur[d]||'–'}${cur[d]?'W':''}</td>${kg?`<td>${cur[d]?(cur[d]/kg).toFixed(2):'–'}</td>`:''}<td>${all[d]||'–'}${all[d]?'W':''}</td></tr>`).join('');
+  // FTP 추정
+  const m20=cur[1200]?Math.round(cur[1200]*0.95):0,m60=cur[3600]||0,cpv=cp?Math.round(cp.cp):0;
+  const rec=Math.max(m20,m60)||cpv;let html='';
+  if(!rec)html='파워 데이터가 있는 운동이 쌓이면 추정해요. (20분 이상 힘껏 탄 기록이 있으면 정확해져요)';
+  else{
+    html+=`<div class="big">${rec} W</div><div class="sub">현재 설정 FTP: ${s.ftp||'없음'}</div><table style="margin-top:8px">`
+      +`<tr><td class="l">20분 최고 × 0.95</td><td>${m20?m20+' W':'–'}</td></tr>`
+      +`<tr><td class="l">60분 최고 (1시간 기록)</td><td>${m60?m60+' W':'–'}</td></tr>`
+      +`<tr><td class="l">CP 모델 (3~20분)</td><td>${cpv?cpv+' W (W′ '+(cp.wp/1000).toFixed(1)+' kJ)':'–'}</td></tr></table>`
+      +`<button class="p" id="applyFtp" style="margin-top:8px">${rec} W를 FTP로 적용</button>`
+      +`<div class="sub">선택 기간의 실제 기록 기준이라, 그 기간에 20분을 힘껏 탄 적이 없으면 실제보다 낮게 나와요. 값이 낮다 싶으면 램프 테스트나 20분 전력 주행으로 확인하세요. 라이덕의 비공개 알고리즘과는 값이 다를 수 있어요.</div>`;
+  }
+  $('ftpBox').innerHTML=html;
+  const ap=$('applyFtp');if(ap)ap.onclick=()=>{SET('ftp',rec);loadSet();render()};
+  // VO2max (5분 최고 파워 기반 ACSM/Hawley 식)
+  const p5=cur[300];
+  $('vo2Box').innerHTML=(p5&&kg)?`<div class="big">${(10.8*p5/kg+7).toFixed(1)} ml/kg/min</div><div class="sub">5분 최고 ${p5}W 기준 추정(10.8×W/kg의 식). 실험실 측정과는 차이가 있어요.</div>`:'체중을 입력하고 5분 이상 힘껏 탄 기록이 있으면 계산해요.';
+  // 존
+  const ftp=s.ftp;
+  if(!ftp){$('zones').innerHTML='<tr><td>FTP를 먼저 설정하세요.</td></tr>';return}
+  const Z=[['Z1 회복',0,.55],['Z2 지구력',.55,.75],['Z3 템포',.75,.9],['Z4 역치',.9,1.05],['Z5 VO2max',1.05,1.2],['Z6 무산소',1.2,1.5],['Z7 스프린트',1.5,99]];
+  const t=Z.map(()=>0);
+  ACTS.forEach(a=>{if(!a.power_hist||new Date(a.start).getTime()<since)return;
+    for(const [b,sec] of Object.entries(a.power_hist)){const r=(+b+2.5)/ftp;const i=Z.findIndex(z=>r>=z[1]&&r<z[2]);if(i>=0)t[i]+=sec}});
+  const tot=t.reduce((a,b)=>a+b,0)||1;
+  $('zones').innerHTML=Z.map((z,i)=>`<tr><td class="l">${z[0]}<div class="sub">${Math.round(z[1]*ftp)}${z[2]>9?'+':'–'+Math.round(z[2]*ftp)}W</div></td><td class="l"><span class="bar" style="width:${Math.round(t[i]/tot*100*1.4)}px"></span> ${(t[i]/tot*100).toFixed(0)}%</td><td>${fmtDur(t[i])}</td></tr>`).join('');
+}
+$('pcRange').addEventListener('change',renderPower);
+
+// ---------- 주간 훈련량 ----------
+function renderWeekly(){
+  const s=S(),mon=t=>{const d=new Date(t);const k=(d.getDay()+6)%7;return new Date(d.getFullYear(),d.getMonth(),d.getDate()-k).getTime()};
+  const by={};ACTS.forEach(a=>{const k=mon(new Date(a.start).getTime());const o=by[k]||(by[k]={tss:0,sec:0,m:0,n:0});o.tss+=tss(a,s);o.sec+=a.duration_s;o.m+=a.distance_m;o.n++});
+  const ks=Object.keys(by).map(Number).sort((a,b)=>b-a).slice(0,8);
+  $('wk').innerHTML='<tr><th class="l">주 시작</th><th>횟수</th><th>시간</th><th>거리</th><th>TSS</th></tr>'+ks.map(k=>{const d=new Date(k),o=by[k];return`<tr><td class="l">${d.getMonth()+1}/${d.getDate()}</td><td>${o.n}</td><td>${fmtDur(o.sec)}</td><td>${(o.m/1000).toFixed(0)}km</td><td>${o.tss.toFixed(0)}</td></tr>`}).join('');
+}
+
+// ---------- 코스 시뮬레이션 ----------
+let GPX=null;
+$('gpxFile').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+  const pts=[...doc.getElementsByTagName('trkpt')].map(p=>({la:+p.getAttribute('lat'),lo:+p.getAttribute('lon'),el:+((p.getElementsByTagName('ele')[0]||{}).textContent||0)}));
+  const rp=pts.length?pts:[...doc.getElementsByTagName('rtept')].map(p=>({la:+p.getAttribute('lat'),lo:+p.getAttribute('lon'),el:+((p.getElementsByTagName('ele')[0]||{}).textContent||0)}));
+  if(rp.length<2){GPX=null;$('simOut').innerHTML='<span class="err">GPX에서 경로 점을 찾지 못했어요.</span>';return}
+  GPX=buildCourse(rp);$('simOut').innerHTML=`<div class="msg">${(GPX.dist/1000).toFixed(1)}km · 상승 ${Math.round(GPX.gain)}m 불러옴</div>`;
+});
+function buildCourse(p){
+  const R=6371000,rad=Math.PI/180,seg=[];let dist=0,gain=0;
+  // 고도 이동평균으로 잡음 제거
+  const el=p.map((_,i)=>{let a=0,n=0;for(let j=Math.max(0,i-3);j<=Math.min(p.length-1,i+3);j++){a+=p[j].el;n++}return a/n});
+  let acc=0,accUp=0,start=0;
+  for(let i=1;i<p.length;i++){
+    const dl=(p[i].la-p[i-1].la)*rad,dn=(p[i].lo-p[i-1].lo)*rad,a=Math.sin(dl/2)**2+Math.cos(p[i].la*rad)*Math.cos(p[i-1].la*rad)*Math.sin(dn/2)**2;
+    const d=2*R*Math.asin(Math.sqrt(a));acc+=d;dist+=d;if(el[i]>el[i-1])gain+=el[i]-el[i-1];
+    if(acc>=40||i===p.length-1){seg.push({d:acc,dh:el[i]-el[start],x:dist,el:el[i]});acc=0;start=i}
+  }
+  return {seg,dist,gain};
+}
+function simSpeed(P,grad,m,cda,crr){ // 일정 파워에서의 속도(m/s)
+  const rho=1.2,g=9.81,eta=0.97,th=Math.atan(grad),a=m*g*(Math.sin(th)+crr*Math.cos(th)),b=0.5*rho*cda;
+  const f=v=>P*eta-a*v-b*v**3;let lo=1,hi=30;
+  if(f(lo)<=0)return lo;                  // 너무 가파름: 걷는 속도로 제한
+  for(let i=0;i<40;i++){const mid=(lo+hi)/2;f(mid)>0?lo=mid:hi=mid}
+  return Math.min(lo,16.7);               // 내리막은 60km/h로 제한(제동)
+}
+function simTime(P,pr){let t=0;GPX.seg.forEach(s=>{const v=simSpeed(P,s.dh/s.d,pr.m,pr.cda,pr.crr);t+=s.d/v});return t}
+$('simBtn').onclick=()=>{
+  if(!GPX){$('simOut').innerHTML='<span class="err">먼저 GPX 파일을 고르세요.</span>';return}
+  const P=+$('sPower').value,kg=+$('sWeight').value,bk=+$('sBike').value||9;
+  if(!P||!kg){$('simOut').innerHTML='<span class="err">파워와 체중을 입력하세요.</span>';return}
+  SET('simPower',P);SET('weight',kg);
+  const pr={m:kg+bk,cda:+$('sCda').value||0.34,crr:+$('sCrr').value||0.005};
+  const t=simTime(P,pr);let html=`<div class="big">${fmtT(t)}</div><div class="sub">평균 ${(GPX.dist/t*3.6).toFixed(1)}km/h · ${(GPX.dist/1000).toFixed(1)}km · 상승 ${Math.round(GPX.gain)}m</div>`;
+  html+='<table style="margin-top:8px"><tr><th class="l">파워</th><th>시간</th><th>차이</th></tr>'+[-20,-10,10,20].map(d=>{const tt=simTime(P+d,pr);return`<tr><td class="l">${P+d}W (${d>0?'+':''}${d})</td><td>${fmtT(tt)}</td><td>${tt<t?'-':'+'}${fmtT(Math.abs(tt-t))}</td></tr>`}).join('')+'</table>';
+  const tgt=(+$('sTarget').value||0)*60;
+  if(tgt){let lo=30,hi=800;for(let i=0;i<30;i++){const mid=(lo+hi)/2;simTime(mid,pr)>tgt?lo=mid:hi=mid}
+    html+=`<div style="margin-top:8px">목표 ${fmtT(tgt)}에 필요한 평균 파워: <b>${Math.round(hi)} W</b>${S().ftp?` (FTP의 ${Math.round(hi/S().ftp*100)}%)`:''}</div>`}
+  html+='<div class="sub">일정 파워, 무풍, 코너·신호·정차 없음 기준이에요. 실제 주행은 보통 더 오래 걸려요. 정차와 코너를 감안해 5~10% 여유를 두세요.</div>';
+  $('simOut').innerHTML=html;
+  // 고도/속도 그래프
+  const pts=[],sp=[];GPX.seg.forEach(s=>{pts.push({x:s.x/1000,y:s.el});sp.push({x:s.x/1000,y:simSpeed(P,s.dh/s.d,pr.m,pr.cda,pr.crr)*3.6})});
+  lineChart($('simChart'),[{c:'#8b97a6',w:1.5,pts},{c:'#2dd4a0',w:1.5,pts:sp.map(p=>({x:p.x,y:p.y*(Math.max(...pts.map(q=>q.y))/Math.max(...sp.map(q=>q.y)))}))}],{y0:Math.min(...pts.map(p=>p.y)),xt:[0,GPX.dist/2000,GPX.dist/1000],fmtx:x=>x.toFixed(0)+'km'});
+};
+
+// ---------- 러닝 ----------
+function renderRun(){
+  if($('tab-run').classList.contains('hide'))return;
+  const runs=ACTS.filter(a=>a.sport==='running'||a.sport==='trailrunning'),since=Date.now()-90*DAY;
+  const best=(from)=>{const o={};runs.forEach(a=>{if(!a.best_time||new Date(a.start).getTime()<from)return;for(const [d,t] of Object.entries(a.best_time))if(!o[d]||t<o[d].t)o[d]={t,a}});return o};
+  const rec=best(since),all=best(0),D=[[1000,'1km'],[3000,'3km'],[5000,'5km'],[10000,'10km'],[21097,'하프']];
+  const pace=(t,d)=>fmtT(t/(d/1000)).replace(/^0:/,'')+'/km';
+  $('runBest').innerHTML='<tr><th class="l">거리</th><th>최근 90일</th><th>전체</th></tr>'+D.map(([d,l])=>`<tr><td class="l">${l}</td><td>${rec[d]?fmtT(rec[d].t)+'<div class="sub">'+pace(rec[d].t,d)+'</div>':'–'}</td><td>${all[d]?fmtT(all[d].t)+'<div class="sub">'+pace(all[d].t,d)+'</div>':'–'}</td></tr>`).join('');
+  // Riegel: T2 = T1 × (D2/D1)^1.06, 최근 90일 최고 기록들로 계산 후 가장 보수적인 값 근처 제시
+  const src=[3000,5000,10000].filter(d=>rec[d]);
+  if(!src.length)$('riegel').textContent='최근 90일에 3km 이상 달린 기록이 있으면 예측해요.';
+  else{
+    const tg=[[5000,'5km'],[10000,'10km'],[21097,'하프']];
+    $('riegel').innerHTML='<table><tr><th class="l">기준 기록</th>'+tg.map(g=>`<th>${g[1]} 예측</th>`).join('')+'</tr>'+
+      src.map(d=>`<tr><td class="l">${D.find(x=>x[0]===d)[1]} ${fmtT(rec[d].t)}</td>${tg.map(g=>`<td>${fmtT(rec[d].t*Math.pow(g[0]/d,1.06))}</td>`).join('')}</tr>`).join('')+'</table><div class="sub">훈련 중 일부 구간 기록으로 계산한 값이라, 레이스 컨디션과 코스에 따라 크게 달라질 수 있어요. 기준 거리가 목표와 가까울수록 정확해요.</div>';
+  }
+  $('runList').innerHTML='<tr><th class="l">날짜</th><th>거리</th><th>시간</th><th>페이스</th><th>심박</th></tr>'+runs.slice().sort((a,b)=>b.start.localeCompare(a.start)).slice(0,15).map(a=>{const d=new Date(a.start);return`<tr><td class="l">${d.getMonth()+1}/${d.getDate()}</td><td>${(a.distance_m/1000).toFixed(1)}km</td><td>${fmtDur(a.duration_s)}</td><td>${a.distance_m?pace(a.duration_s,a.distance_m):'–'}</td><td>${a.avg_hr||'–'}</td></tr>`}).join('');
+}
+
+// render 확장
+const _render=render;render=function(){_render();renderWeekly();renderPower();renderRun()};
 </script>
 </body>
 </html>

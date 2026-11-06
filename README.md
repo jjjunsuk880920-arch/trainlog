@@ -6,7 +6,10 @@ Render 환경변수에 `SITE_PASSWORD`, `IGP_USER`(IGPSPORT 이메일), `IGP_PAS
 
 스트라바에 올라온 내 운동을 자동으로 가져와 체력(CTL)·피로(ATL)·컨디션(TSB) 곡선을 보여줍니다.
 
-## 1. 스트라바 API 앱 만들기 (한 번만)
+## 화면 기능
+홈(체력·피로·컨디션 곡선, 주간 훈련량) · 파워(파워 커브, FTP 추정, VO2max 추정, 7존) · 시뮬레이션(GPX 코스 완주 시간·필요 파워) · 러닝(구간별 최고 기록, 기록 예측)
+
+## (스트라바를 쓸 경우) 1. 스트라바 API 앱 만들기 (한 번만)
 1. https://www.strava.com/settings/api 접속 → 앱 만들기 (이름·웹사이트는 아무거나)
 2. **Authorization Callback Domain** 칸에 Render 주소의 도메인만 입력 (예: `trainlog.onrender.com`, https:// 제외)
 3. 화면에 나오는 **Client ID**, **Client Secret** 을 메모

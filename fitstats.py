@@ -9,7 +9,9 @@ from datetime import timezone
 import fitdecode
 
 POWER_BIN = 5          # 파워 분포 구간(W)
-BEST_WINDOWS = (5, 60, 300, 1200, 3600)   # 최고 평균 파워 구간(초)
+BEST_WINDOWS = (1, 5, 10, 30, 60, 120, 180, 300, 480, 600, 900, 1200, 1800, 2400, 3600)   # 최고 평균 파워 구간(초)
+BEST_DISTS = (1000, 3000, 5000, 10000, 21097)   # 러닝 최고 기록 거리(m)
+SUMMARY_VERSION = 2
 MAX_DT = 5.0           # 기록 간격이 이보다 길면(정지·끊김) 5초만 센다
 
 
@@ -87,6 +89,34 @@ def best_powers(series):
     return out
 
 
+def best_times(samples):
+    """누적거리 기준, 각 거리를 가장 빨리 달린 구간의 시간(초). 정지 시간은 포함된다."""
+    pts = [((s["t"] - samples[0]["t"]).total_seconds(), s["dist"]) for s in samples if s["dist"] is not None]
+    out = {}
+    if len(pts) < 2:
+        return out
+    for D in BEST_DISTS:
+        if pts[-1][1] - pts[0][1] < D:
+            continue
+        best, j = None, 0
+        for i in range(len(pts)):
+            if j < i:
+                j = i
+            while j < len(pts) and pts[j][1] - pts[i][1] < D:
+                j += 1
+            if j >= len(pts):
+                break
+            # 거리 D 지점을 j-1~j 사이에서 보간
+            d0, d1 = pts[j - 1][1] - pts[i][1], pts[j][1] - pts[i][1]
+            t0, t1 = pts[j - 1][0], pts[j][0]
+            tt = t0 + (t1 - t0) * ((D - d0) / (d1 - d0) if d1 > d0 else 1) - pts[i][0]
+            if best is None or tt < best:
+                best = tt
+        if best is not None and best > 0:
+            out[str(D)] = round(best)
+    return out
+
+
 def elevation_gain(samples):
     alts = [s["alt"] for s in samples if s["alt"] is not None]
     if len(alts) < 5:
@@ -156,6 +186,8 @@ def summarize(samples, session=None):
         "max_power": (int(max(series)) if has_power and series else None),
         "avg_cad": round(cad_sum / cad_w) if cad_w else None,
         "best_power": best_powers(series) if has_power else {},
+        "best_time": best_times(samples) if sport in ("running", "walking") or not has_power else {},
+        "v": SUMMARY_VERSION,
         "hr_hist": {k: round(v) for k, v in hr_hist.items()},
         "power_hist": {k: round(v) for k, v in p_hist.items()} if has_power else {},
     }
