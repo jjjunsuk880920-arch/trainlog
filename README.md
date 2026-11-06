@@ -1,4 +1,8 @@
-# TrainLog – 스트라바 연동 훈련 분석 (개인용)
+# TrainLog – 훈련 분석 (개인용)
+
+## 가장 쉬운 방법: IGPSPORT 직접 연동 (무료)
+Render 환경변수에 `SITE_PASSWORD`, `IGP_USER`(IGPSPORT 이메일), `IGP_PASSWORD`, `IGP_REGION`(international 또는 china)을 넣으면 끝이에요. 비공식 방식이라 IGPSPORT가 바꾸면 멈출 수 있어요. 스트라바는 2026년 6월부터 API에 유료 구독이 필요해서, 구독할 때만 아래 방법을 쓰세요.
+
 
 스트라바에 올라온 내 운동을 자동으로 가져와 체력(CTL)·피로(ATL)·컨디션(TSB) 곡선을 보여줍니다.
 

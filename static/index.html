@@ -194,7 +194,9 @@ function showLogin(){$('loginBox').classList.remove('hide');$('app').classList.a
 async function start(){
   const r=await fetch('/api/me',{credentials:'same-origin'});
   if(r.status===401){showLogin();return}
+  const me=await r.json().catch(()=>({}));
   $('loginBox').classList.add('hide');$('app').classList.remove('hide');
+  if(me.source==='igpsport')$('connectBtn').parentElement.classList.add('hide');
   await openDb();ACTS=await allActs();loadSet();updConnect();render();sync();
 }
 $('loginBtn').onclick=async()=>{

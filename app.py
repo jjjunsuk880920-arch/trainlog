@@ -7,6 +7,7 @@ import time
 from flask import Flask, jsonify, request, send_from_directory, make_response, redirect, g
 
 import fitstats
+from igp import IgpClient, IgpError
 from strava import StravaClient, StravaError, authorize_url, exchange_code
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -23,11 +24,20 @@ _fails = {"n": 0, "until": 0.0}  # 비밀번호 무차별 대입 방지
 
 
 _clients = {}
+_igp = None
+
+
+def igp_mode():
+    return bool(os.environ.get("IGP_USER") and os.environ.get("IGP_PASSWORD"))
 
 
 def client():
     """요청 헤더의 토큰(브라우저에 저장됨)을 우선 쓰고, 없으면 환경변수 토큰을 쓴다."""
-    global _client
+    global _client, _igp
+    if igp_mode():
+        if _igp is None:
+            _igp = IgpClient(os.environ["IGP_USER"], os.environ["IGP_PASSWORD"], os.environ.get("IGP_REGION", "international"))
+        return _igp
     cid, sec = os.environ.get("STRAVA_CLIENT_ID"), os.environ.get("STRAVA_CLIENT_SECRET")
     hdr = request.headers.get("X-Strava-Token", "").strip()
     if hdr and cid and sec:
@@ -124,7 +134,7 @@ def login():
 
 @app.get("/api/me")
 def me():
-    return jsonify(ok=True)
+    return jsonify(ok=True, source="igpsport" if igp_mode() else "strava")
 
 
 @app.get("/api/activities")
@@ -132,7 +142,7 @@ def activities():
     try:
         limit = max(1, min(int(request.args.get("limit", 20)), 200))
         return jsonify(items=client().list_activities(limit))
-    except StravaError as e:
+    except (StravaError, IgpError) as e:
         return jsonify(error=str(e)), 502
     except ValueError:
         return jsonify(error="limit 값이 올바르지 않아요."), 400
@@ -145,7 +155,7 @@ def activity(rid):
     try:
         samples, session = client().activity_samples(rid)
         summ = fitstats.summarize(samples, session)
-    except StravaError as e:
+    except (StravaError, IgpError) as e:
         return jsonify(error=str(e)), 502
     except Exception:             # 예상 못한 데이터: 내용은 숨기고 일반 메시지만
         return jsonify(error="운동 데이터를 해석하지 못했어요."), 422

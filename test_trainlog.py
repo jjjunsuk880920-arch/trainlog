@@ -70,3 +70,48 @@ r = t.get("/api/activities"); assert r.status_code == 502 and "연결" in r.json
 with mock.patch.object(appmod, "exchange_code", lambda *a: "TOK123"):
     r = t.get("/strava/callback?code=abc"); assert b"localStorage.setItem('tl_st',\"TOK123\")" in r.data
 print("ALL OK 2")
+
+# ---- IGPSPORT 모드 ----
+import io, igp
+from fit_tool.fit_file_builder import FitFileBuilder
+from fit_tool.profile.messages.file_id_message import FileIdMessage
+from fit_tool.profile.messages.record_message import RecordMessage
+from fit_tool.profile.messages.session_message import SessionMessage
+from fit_tool.profile.profile_type import FileType, Manufacturer, Sport
+st = dt.datetime(2026, 11, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+b = FitFileBuilder(auto_define=True)
+f = FileIdMessage(); f.type = FileType.ACTIVITY; f.manufacturer = Manufacturer.DEVELOPMENT.value; f.product = 0
+f.time_created = int(st.timestamp()*1000); f.serial_number = 1; b.add(f)
+for i in range(1200):
+    r = RecordMessage(); r.timestamp = int(st.timestamp()*1000)+i*1000; r.power = 220; r.heart_rate = 150; r.distance = i*8.0; b.add(r)
+s_ = SessionMessage(); s_.sport = Sport.CYCLING; s_.start_time = int(st.timestamp()*1000); s_.total_timer_time = 1200.0
+s_.total_elapsed_time = 1200.0; s_.total_distance = 9600.0; b.add(s_)
+FIT = b.build().to_bytes()
+
+class RR:
+    def __init__(s, j, code=200): s._j, s.status_code = j, code
+    def json(s): return s._j
+def ipost(url, **kw): return RR({"data": {"access_token": "TOK"}})
+def iget(url, headers=None, params=None, **kw):
+    assert headers["Authorization"] == "Bearer TOK"
+    if url.endswith("queryMyActivity"): return RR({"data": {"rows": [{"rideId": 11, "title": "A", "startTime": "2026.11.01"}]}})
+    if "queryActivityDetail" in url: return RR({"data": {"fitUrl": "https://files.example/x.fit"}})
+    return RR({}, 404)
+ic = igp.IgpClient("u", "p")
+with mock.patch.object(ic._s, "post", ipost), mock.patch.object(ic._s, "get", iget):
+    assert ic.list_activities(5) == [{"id": 11, "title": "A", "start": "2026.11.01"}]
+    with mock.patch.object(igp.requests, "get", lambda *a, **k: mock.Mock(raise_for_status=lambda: None, raw=mock.Mock(read=lambda n, decode_content=True: FIT))):
+        smp, ses = ic.activity_samples(11)
+    d = fitstats.summarize(smp, ses)
+    assert d["sport"] == "cycling" and abs(d["np"]-220) <= 1 and d["avg_hr"] == 150, d
+bad = igp.IgpClient("u", "p")
+with mock.patch.object(bad._s, "post", lambda *a, **k: RR({"data": None})):
+    try: bad.list_activities(); raise SystemExit("x")
+    except igp.IgpError as e: assert "로그인" in str(e)
+os.environ.update(IGP_USER="u", IGP_PASSWORD="p")
+appmod._igp = mock.Mock(); appmod._igp.list_activities.return_value = [{"id": 11, "title": "A", "start": ""}]
+appmod._igp.activity_samples.return_value = (smp, ses)
+assert t.get("/api/me").json["source"] == "igpsport"
+assert t.get("/api/activities").json["items"][0]["id"] == 11
+assert t.get("/api/activity/11").json["np"]
+print("ALL OK 3")

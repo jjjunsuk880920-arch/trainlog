@@ -9,6 +9,12 @@ services:
     envVars:
       - key: SITE_PASSWORD
         sync: false
+      - key: IGP_USER
+        sync: false
+      - key: IGP_PASSWORD
+        sync: false
+      - key: IGP_REGION
+        value: international
       - key: STRAVA_CLIENT_ID
         sync: false
       - key: STRAVA_CLIENT_SECRET
