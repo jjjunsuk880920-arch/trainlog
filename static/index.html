@@ -240,7 +240,7 @@ async function sync(){
   if(syncing)return;syncing=true;$('syncBtn').disabled=true;$('syncMsg').className='msg';
   try{
     const have=new Set(ACTS.map(a=>a.id));
-    const stale=new Set(ACTS.filter(a=>a.v!==2).map(a=>a.id));
+    const stale=new Set(ACTS.filter(a=>a.v!==3).map(a=>a.id));
     const first=ACTS.length===0;
     $('syncMsg').textContent='목록 확인 중…';
     const {items}=await api('/api/activities?limit='+((first||stale.size)?100:20));
@@ -297,12 +297,27 @@ $('sPower').addEventListener('change',()=>SET('simPower',+$('sPower').value||0))
 const _loadSet=loadSet;loadSet=function(){_loadSet();const s=S();$('weight').value=$('sWeight').value=s.weight||'';$('sPower').value=s.simPower||s.ftp||''};
 
 // ---------- 파워 커브 ----------
-const DURS=[1,5,10,30,60,120,180,300,480,600,900,1200,1800,2400,3600];
+const DURS=[1,5,10,30,60,120,180,240,300,420,480,600,900,1200,1800,2400,3600];
 function bestCurve(since){
   const out={};ACTS.forEach(a=>{if(!a.best_power||new Date(a.start).getTime()<since)return;
     for(const [d,w] of Object.entries(a.best_power))out[d]=Math.max(out[d]||0,w)});
   // 긴 구간 값이 짧은 구간보다 클 수 없게 보정
   let m=Infinity;DURS.forEach(d=>{if(out[d]!=null){out[d]=Math.min(out[d],m);m=out[d]}});return out;
+}
+function bestSrc(since){
+  const out={};ACTS.forEach(a=>{if(!a.best_power||new Date(a.start).getTime()<since)return;
+    for(const [d,w] of Object.entries(a.best_power))if(!out[d]||w>out[d].w)out[d]={w,date:a.start}});return out}
+function ftpEstimate(cur,cp){
+  // 구간별 '이 기록이 풀로 낸 것이라면 FTP는 얼마?' 를 계산하고, 가장 높은 값(=가장 힘껏 낸 구간)을 채택한다.
+  // 짧은 구간: P - W'/t (임계파워 모델, W'는 내 기록으로 맞춘 값이 합리적이면 사용, 아니면 20kJ)
+  const wp=cp&&cp.wp>=12000&&cp.wp<=30000?cp.wp:20000;
+  const rows=[[240,d=>cur[d]-wp/d],[300,d=>cur[d]-wp/d],[420,d=>cur[d]-wp/d],[600,d=>cur[d]-wp/d],[900,d=>cur[d]-wp/d],
+    [1200,d=>cur[d]-wp/d],[1800,d=>cur[d]*0.98],[2400,d=>cur[d]*0.99],[3600,d=>cur[d]]]
+    .filter(r=>cur[r[0]]).map(r=>({d:r[0],p:cur[r[0]],f:Math.round(r[1](r[0]))}));
+  if(!rows.length)return null;
+  rows.sort((a,b)=>b.f-a.f);
+  const top=rows[0],second=rows[1];
+  return {rows:rows.sort((a,b)=>a.d-b.d),top,wp,spike:second&&top.f>second.f*1.08};
 }
 function cpFit(c){ // 임계 파워(CP)·W' : 일(J) = CP·t + W'
   const ds=[180,300,600,1200].filter(d=>c[d]);if(ds.length<3)return null;
@@ -335,17 +350,17 @@ function renderPower(){
   const kg=s.weight||0;
   $('pcTbl').innerHTML='<tr><th class="l">구간</th><th>선택 기간</th>'+(kg?'<th>W/kg</th>':'')+'<th>전체</th></tr>'+
     [1,5,30,60,300,600,1200,3600].map(d=>`<tr><td class="l">${durLabel(d)}</td><td>${cur[d]||'–'}${cur[d]?'W':''}</td>${kg?`<td>${cur[d]?(cur[d]/kg).toFixed(2):'–'}</td>`:''}<td>${all[d]||'–'}${all[d]?'W':''}</td></tr>`).join('');
-  // FTP 추정
-  const m20=cur[1200]?Math.round(cur[1200]*0.95):0,m60=cur[3600]||0,cpv=cp?Math.round(cp.cp):0;
-  const rec=Math.max(m20,m60)||cpv;let html='';
-  if(!rec)html='파워 데이터가 있는 운동이 쌓이면 추정해요. (20분 이상 힘껏 탄 기록이 있으면 정확해져요)';
+  // FTP 추정 (여러 구간을 비교해 가장 힘껏 낸 구간을 기준으로)
+  const est=ftpEstimate(cur,cp),src=bestSrc(since);let html='',rec=0;
+  if(!est)html='4분 이상 파워 기록이 쌓이면 추정해요.';
   else{
-    html+=`<div class="big">${rec} W</div><div class="sub">현재 설정 FTP: ${s.ftp||'없음'}</div><table style="margin-top:8px">`
-      +`<tr><td class="l">20분 최고 × 0.95</td><td>${m20?m20+' W':'–'}</td></tr>`
-      +`<tr><td class="l">60분 최고 (1시간 기록)</td><td>${m60?m60+' W':'–'}</td></tr>`
-      +`<tr><td class="l">CP 모델 (3~20분)</td><td>${cpv?cpv+' W (W′ '+(cp.wp/1000).toFixed(1)+' kJ)':'–'}</td></tr></table>`
+    rec=est.top.f;const fd=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()}`};
+    html+=`<div class="big">${rec} W</div><div class="sub">현재 설정 FTP: ${s.ftp||'없음'} · 기준: ${durLabel(est.top.d)} 기록 ${est.top.p}W (${src[est.top.d]?fd(src[est.top.d].date):''})</div>`
+      +'<table style="margin-top:8px"><tr><th class="l">구간</th><th>최고</th><th>날짜</th><th>→ FTP</th></tr>'
+      +est.rows.map(r=>`<tr${r===est.top?' style="color:var(--g);font-weight:700"':''}><td class="l">${durLabel(r.d)}</td><td>${r.p}W</td><td>${src[r.d]?fd(src[r.d].date):''}</td><td>${r.f}W</td></tr>`).join('')+'</table>'
+      +(est.spike?'<div class="sub" style="color:var(--o)">한 구간만 다른 구간보다 훨씬 높아요. 센서 오류나 한 번의 특별한 노력일 수 있으니 날짜의 운동을 확인해 보세요.</div>':'')
       +`<button class="p" id="applyFtp" style="margin-top:8px">${rec} W를 FTP로 적용</button>`
-      +`<div class="sub">선택 기간의 실제 기록 기준이라, 그 기간에 20분을 힘껏 탄 적이 없으면 실제보다 낮게 나와요. 값이 낮다 싶으면 램프 테스트나 20분 전력 주행으로 확인하세요. 라이덕의 비공개 알고리즘과는 값이 다를 수 있어요.</div>`;
+      +`<div class="sub">각 구간의 최고 기록을 FTP로 환산한 뒤(짧은 구간은 W′ ${(est.wp/1000).toFixed(0)}kJ 모델, 30분 이상은 보정계수), 가장 높게 나온 구간을 채택해요. 모든 구간이 그 기간에 힘껏 낸 기록이 아니면 실제보다 낮게 나올 수 있어요. 라이덕의 비공개 알고리즘과는 값이 다를 수 있어요.</div>`;
   }
   $('ftpBox').innerHTML=html;
   const ap=$('applyFtp');if(ap)ap.onclick=()=>{SET('ftp',rec);loadSet();render()};

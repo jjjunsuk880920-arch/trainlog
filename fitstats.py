@@ -9,9 +9,10 @@ from datetime import timezone
 import fitdecode
 
 POWER_BIN = 5          # 파워 분포 구간(W)
-BEST_WINDOWS = (1, 5, 10, 30, 60, 120, 180, 300, 480, 600, 900, 1200, 1800, 2400, 3600)   # 최고 평균 파워 구간(초)
+BEST_WINDOWS = (1, 5, 10, 30, 60, 120, 180, 240, 300, 420, 480, 600, 900, 1200, 1800, 2400, 3600)   # 최고 평균 파워 구간(초)
 BEST_DISTS = (1000, 3000, 5000, 10000, 21097)   # 러닝 최고 기록 거리(m)
-SUMMARY_VERSION = 2
+SUMMARY_VERSION = 3
+MAX_VALID_POWER = 2500   # 이보다 큰 값은 센서 오류로 보고 버린다
 MAX_DT = 5.0           # 기록 간격이 이보다 길면(정지·끊김) 5초만 센다
 
 
@@ -52,17 +53,33 @@ def _cumsum(v):
 
 
 def power_series_1hz(samples):
-    """1초 간격 파워 배열. 10초 이하 공백은 직전 값으로 채우고, 그보다 길면(정지) 건너뛴다."""
-    out, prev_t, prev_p = [], None, 0.0
+    """실제 경과 시간(초) 기준 1Hz 파워 배열 2개를 돌려준다.
+    (true)   정지 구간을 0W로 채운 시간 그대로의 배열 -> 구간 최고 파워(5분·20분 등)용
+    (active) 정지 구간을 뺀 배열 -> 평균/NP용
+    같은 초에 기록이 여러 개면 평균내어 1초로 센다(시간이 늘어나는 오류 방지).
+    10초 이하 공백은 직전 값으로 메우고, 더 길면 정지로 본다."""
+    t0 = samples[0]["t"]
+    by = {}
     for s in samples:
-        p = float(s["p"]) if s["p"] is not None else 0.0
-        if prev_t is not None:
-            gap = (s["t"] - prev_t).total_seconds()
-            if 1 < gap <= 10:
-                out.extend([prev_p] * int(gap - 1))
-        out.append(p)
-        prev_t, prev_p = s["t"], p
-    return out
+        p = s["p"]
+        if p is None or p < 0 or p > MAX_VALID_POWER:
+            p = 0.0 if p is None else None
+        sec = int((s["t"] - t0).total_seconds())
+        if p is None:
+            continue
+        by.setdefault(sec, []).append(float(p))
+    if not by:
+        return [], []
+    true, active, prev, last = [], [], 0.0, None
+    for sec in range(max(by) + 1):
+        if sec in by:
+            prev = sum(by[sec]) / len(by[sec])
+            true.append(prev); active.append(prev); last = sec
+        elif last is not None and sec - last <= 10:
+            true.append(prev); active.append(prev)
+        else:
+            true.append(0.0)
+    return true, active
 
 
 def normalized_power(series):
@@ -151,7 +168,7 @@ def summarize(samples, session=None):
         if s["cad"]:
             cad_sum += s["cad"] * dt; cad_w += dt
 
-    series = power_series_1hz(samples)
+    true_series, series = power_series_1hz(samples)
     nonzero = sum(1 for x in series if x > 0)
     has_power = len(series) > 60 and nonzero > len(series) * 0.2
     np_w = normalized_power(series) if has_power else 0.0
@@ -183,9 +200,9 @@ def summarize(samples, session=None):
         "has_power": bool(has_power),
         "avg_power": round(avg_p) if has_power else None,
         "np": round(np_w) if has_power else None,
-        "max_power": (int(max(series)) if has_power and series else None),
+        "max_power": (int(max(true_series)) if has_power and true_series else None),
         "avg_cad": round(cad_sum / cad_w) if cad_w else None,
-        "best_power": best_powers(series) if has_power else {},
+        "best_power": best_powers(true_series) if has_power else {},
         "best_time": best_times(samples) if sport in ("running", "walking") or not has_power else {},
         "v": SUMMARY_VERSION,
         "hr_hist": {k: round(v) for k, v in hr_hist.items()},

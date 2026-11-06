@@ -125,3 +125,27 @@ ps = [{"t": t0+dt.timedelta(seconds=i), "hr": 140, "p": (400 if i < 5 else 200),
 pd_ = fitstats.summarize(ps, {"sport": "cycling"})
 assert pd_["best_power"]["1"] == 400 and pd_["best_power"]["3600"] == 200 and pd_["best_time"] == {}, pd_
 print("ALL OK 4")
+
+# ---- 중복 타임스탬프/정지 구간/센서 오류 ----
+
+import datetime as dt, fitstats
+t0=dt.datetime(2026,11,1,tzinfo=dt.timezone.utc)
+# 2Hz 중복 타임스탬프: 같은 초에 두 번 기록, 파워 200W 일정 + 600초만 300W
+def mk(dup):
+    out=[]
+    for i in range(2400):
+        p=300 if 1000<=i<1600 else 200
+        for _ in range(2 if dup else 1): out.append({"t":t0+dt.timedelta(seconds=i),"hr":140,"p":p,"cad":None,"spd":None,"alt":None,"dist":i*8.0})
+    return out
+a=fitstats.summarize(mk(False),{"sport":"cycling"}); b=fitstats.summarize(mk(True),{"sport":"cycling"})
+print(a["best_power"]["600"],b["best_power"]["600"],a["best_power"]["1200"],b["best_power"]["1200"])
+assert a["best_power"]==b["best_power"]
+# 정지 구간 이어붙임 방지: 300W 5분 -> 정지 5분 -> 300W 5분 : 10분 최고는 150W여야 함(300W 아님)
+seg=[]
+for i in range(300): seg.append((i,300))
+for i in range(600,900): seg.append((i,300))
+x=[{"t":t0+dt.timedelta(seconds=i),"hr":140,"p":p,"cad":None,"spd":None,"alt":None,"dist":i*8.0} for i,p in seg]
+c=fitstats.summarize(x,{"sport":"cycling"}); print(c["best_power"]["600"],c["best_power"]["300"]); assert c["best_power"]["300"]==300 and c["best_power"]["600"]<=160
+# 센서 오류 3000W 무시
+y=mk(False); y[10]["p"]=9999; d=fitstats.summarize(y,{"sport":"cycling"}); assert d["best_power"]["1"]<=300, d["best_power"]["1"]
+print("ALL OK 5")
