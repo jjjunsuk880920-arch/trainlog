@@ -120,7 +120,7 @@ print("ALL OK 3")
 t0 = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
 rs = [{"t": t0+dt.timedelta(seconds=i), "hr": 165, "p": None, "cad": None, "spd": None, "alt": None, "dist": i*(1000/210)} for i in range(2400)]
 rd = fitstats.summarize(rs, {"sport": "running"})
-assert abs(rd["best_time"]["5000"]-1050) <= 2 and rd["v"] == 2, rd
+assert abs(rd["best_time"]["5000"]-1050) <= 2 and rd["v"] == fitstats.SUMMARY_VERSION, rd
 ps = [{"t": t0+dt.timedelta(seconds=i), "hr": 140, "p": (400 if i < 5 else 200), "cad": None, "spd": None, "alt": None, "dist": i*8.0} for i in range(4000)]
 pd_ = fitstats.summarize(ps, {"sport": "cycling"})
 assert pd_["best_power"]["1"] == 400 and pd_["best_power"]["3600"] == 200 and pd_["best_time"] == {}, pd_
@@ -149,3 +149,16 @@ c=fitstats.summarize(x,{"sport":"cycling"}); print(c["best_power"]["600"],c["bes
 # 센서 오류 3000W 무시
 y=mk(False); y[10]["p"]=9999; d=fitstats.summarize(y,{"sport":"cycling"}); assert d["best_power"]["1"]<=300, d["best_power"]["1"]
 print("ALL OK 5")
+
+# ---- 업로드(.fit / .fit.gz) + 러닝은 파워 제외 ----
+import gzip
+def post(files): return t.post("/api/upload", data={"files": [(io.BytesIO(b), n) for n, b in files]}, content_type="multipart/form-data")
+r = post([("a.fit", FIT), ("b.fit.gz", gzip.compress(FIT)), ("c.gpx", b"<gpx/>")])
+j = r.json
+assert r.status_code == 200 and len(j["items"]) == 2 and len(j["errors"]) == 1, j
+assert j["items"][0]["id"] == j["items"][1]["id"] and j["items"][0]["np"], j
+rr = [{"t": t0+dt.timedelta(seconds=i), "hr": 165, "p": 250, "cad": None, "spd": None, "alt": None, "dist": i*(1000/235)} for i in range(2400)]
+rd2 = fitstats.summarize(rr, {"sport": "running"})
+assert not rd2["has_power"] and rd2["best_power"] == {} and rd2["best_time"], rd2
+assert t.post("/api/upload").status_code == 200
+print("ALL OK 6")

@@ -1,8 +1,11 @@
 """TrainLog 서버: 스트라바 운동 기록을 읽어 요약(JSON)으로 돌려준다. 저장은 브라우저가 한다."""
+import gzip
 import hashlib
 import hmac
+import io
 import os
 import time
+import zlib
 
 from flask import Flask, jsonify, request, send_from_directory, make_response, redirect, g
 
@@ -11,6 +14,7 @@ from igp import IgpClient, IgpError
 from strava import StravaClient, StravaError, authorize_url, exchange_code
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024
 
 SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "")
 SECRET = os.environ.get("SECRET_KEY") or hashlib.sha256(
@@ -105,6 +109,29 @@ def strava_callback():
     import json as _json
     return ("<meta charset=utf-8><meta name=viewport content='width=device-width'><body style='font:16px system-ui;padding:16px;background:#0f1318;color:#e8edf3'>"
             "연결 완료! 이동 중…<script>localStorage.setItem('tl_st'," + _json.dumps(tok) + ");location.replace('/')</script>")
+
+
+@app.post("/api/upload")
+def upload():
+    """과거 운동 가져오기: .fit 또는 .fit.gz 파일(여러 개)을 올리면 요약을 돌려준다. 서버에는 저장하지 않는다."""
+    items, errors = [], []
+    for f in request.files.getlist("files")[:10]:
+        name = (f.filename or "파일")[:60]
+        try:
+            data = f.read()
+            if data[:2] == b"\x1f\x8b":
+                d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                data = d.decompress(data, 40 * 1024 * 1024)
+            if data[8:12] != b".FIT":
+                errors.append(f"{name}: FIT 파일이 아니에요(GPX/TCX는 지원하지 않아요).")
+                continue
+            summ = fitstats.parse_fit(data)
+            summ["id"] = 10**9 + zlib.crc32((summ["start"] + str(summ["distance_m"])).encode())
+            summ["title"] = name
+            items.append(summ)
+        except Exception:
+            errors.append(f"{name}: 해석하지 못했어요.")
+    return jsonify(items=items, errors=errors)
 
 
 @app.get("/healthz")

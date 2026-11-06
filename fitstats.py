@@ -10,8 +10,9 @@ import fitdecode
 
 POWER_BIN = 5          # 파워 분포 구간(W)
 BEST_WINDOWS = (1, 5, 10, 30, 60, 120, 180, 240, 300, 420, 480, 600, 900, 1200, 1800, 2400, 3600)   # 최고 평균 파워 구간(초)
-BEST_DISTS = (1000, 3000, 5000, 10000, 21097)   # 러닝 최고 기록 거리(m)
-SUMMARY_VERSION = 3
+BEST_DISTS = (1000, 3000, 5000, 10000, 21097, 42195)   # 러닝 최고 기록 거리(m)
+SUMMARY_VERSION = 4
+NO_POWER_SPORTS = ("running", "walking", "hiking", "trail_running", "trailrunning", "swimming")
 MAX_VALID_POWER = 2500   # 이보다 큰 값은 센서 오류로 보고 버린다
 MAX_DT = 5.0           # 기록 간격이 이보다 길면(정지·끊김) 5초만 센다
 
@@ -170,7 +171,8 @@ def summarize(samples, session=None):
 
     true_series, series = power_series_1hz(samples)
     nonzero = sum(1 for x in series if x > 0)
-    has_power = len(series) > 60 and nonzero > len(series) * 0.2
+    sport_pre = str(session.get("sport") or "").lower()
+    has_power = len(series) > 60 and nonzero > len(series) * 0.2 and sport_pre not in NO_POWER_SPORTS
     np_w = normalized_power(series) if has_power else 0.0
     avg_p = (sum(series) / len(series)) if (has_power and series) else 0.0
 
@@ -203,7 +205,7 @@ def summarize(samples, session=None):
         "max_power": (int(max(true_series)) if has_power and true_series else None),
         "avg_cad": round(cad_sum / cad_w) if cad_w else None,
         "best_power": best_powers(true_series) if has_power else {},
-        "best_time": best_times(samples) if sport in ("running", "walking") or not has_power else {},
+        "best_time": best_times(samples) if sport in ("running", "trail_running", "trailrunning") else {},
         "v": SUMMARY_VERSION,
         "hr_hist": {k: round(v) for k, v in hr_hist.items()},
         "power_hist": {k: round(v) for k, v in p_hist.items()} if has_power else {},
