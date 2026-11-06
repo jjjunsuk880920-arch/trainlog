@@ -4,7 +4,7 @@ import hmac
 import os
 import time
 
-from flask import Flask, jsonify, request, send_from_directory, make_response, redirect
+from flask import Flask, jsonify, request, send_from_directory, make_response, redirect, g
 
 import fitstats
 from strava import StravaClient, StravaError, authorize_url, exchange_code
@@ -22,15 +22,36 @@ _cache = {}                      # ride_id -> 요약 (서버가 잠들면 사라
 _fails = {"n": 0, "until": 0.0}  # 비밀번호 무차별 대입 방지
 
 
+_clients = {}
+
+
 def client():
+    """요청 헤더의 토큰(브라우저에 저장됨)을 우선 쓰고, 없으면 환경변수 토큰을 쓴다."""
     global _client
+    cid, sec = os.environ.get("STRAVA_CLIENT_ID"), os.environ.get("STRAVA_CLIENT_SECRET")
+    hdr = request.headers.get("X-Strava-Token", "").strip()
+    if hdr and cid and sec:
+        if hdr not in _clients:
+            if len(_clients) > 5:
+                _clients.clear()
+            _clients[hdr] = StravaClient(cid, sec, hdr)
+        g.sclient, g.stoken = _clients[hdr], hdr
+        return _clients[hdr]
     if _client is None:
-        cid, sec, tok = (os.environ.get(k) for k in ("STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET", "STRAVA_REFRESH_TOKEN"))
+        tok = os.environ.get("STRAVA_REFRESH_TOKEN")
         if not (cid and sec and tok):
-            raise StravaError("서버에 STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET / STRAVA_REFRESH_TOKEN 이 설정되지 않았어요. "
-                              "/strava/connect 에서 승인하면 토큰을 알려드려요.")
+            raise StravaError("스트라바가 아직 연결되지 않았어요. 위의 '스트라바 연결' 버튼을 눌러 주세요.")
         _client = StravaClient(cid, sec, tok)
     return _client
+
+
+@app.after_request
+def rotate_header(resp):
+    c, old = getattr(g, "sclient", None), getattr(g, "stoken", None)
+    if c is not None and c.refresh_token != old:
+        resp.headers["X-Strava-Token-New"] = c.refresh_token
+        resp.headers["Access-Control-Expose-Headers"] = "X-Strava-Token-New"
+    return resp
 
 
 def _token():
@@ -71,9 +92,9 @@ def strava_callback():
         tok = exchange_code(os.environ.get("STRAVA_CLIENT_ID", ""), os.environ.get("STRAVA_CLIENT_SECRET", ""), code)
     except StravaError as e:
         return str(e), 502
-    return ("<meta name=viewport content='width=device-width'><body style='font:16px system-ui;padding:16px'>"
-            "<h3>승인 완료</h3><p>아래 값을 Render 환경변수 <b>STRAVA_REFRESH_TOKEN</b> 에 붙여넣고 저장하세요. "
-            "남에게 보여주지 마세요.</p><textarea readonly style='width:100%;height:90px'>" + tok + "</textarea>")
+    import json as _json
+    return ("<meta charset=utf-8><meta name=viewport content='width=device-width'><body style='font:16px system-ui;padding:16px;background:#0f1318;color:#e8edf3'>"
+            "연결 완료! 이동 중…<script>localStorage.setItem('tl_st'," + _json.dumps(tok) + ");location.replace('/')</script>")
 
 
 @app.get("/healthz")

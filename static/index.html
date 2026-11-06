@@ -46,7 +46,7 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:3px
     </div>
     <div class="msg" id="state" style="margin-top:8px"></div>
     <div class="msg" id="syncMsg"></div>
-    <div class="msg"><a href="/strava/connect" style="color:var(--b)">🔗 스트라바 연결/다시 연결</a></div>
+    <div style="margin-top:8px"><a href="/strava/connect" id="connectBtn"><button class="p" type="button">🔗 스트라바 연결</button></a></div>
   </div>
 
   <div class="card">
@@ -158,7 +158,9 @@ function draw(ser){
 
 // ---------- 동기화 ----------
 async function api(path){
-  const r=await fetch(path,{credentials:'same-origin'});
+  const tok=localStorage.getItem('tl_st');
+  const r=await fetch(path,{credentials:'same-origin',headers:tok?{'X-Strava-Token':tok}:{}});
+  const nt=r.headers.get('X-Strava-Token-New');if(nt)localStorage.setItem('tl_st',nt);
   if(r.status===401){showLogin();throw new Error('auth')}
   const j=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(j.error||('오류 '+r.status));
@@ -187,12 +189,13 @@ async function sync(){
 $('syncBtn').onclick=sync;
 
 // ---------- 로그인 ----------
+function updConnect(){$('connectBtn').firstChild.textContent=localStorage.getItem('tl_st')?'🔗 스트라바 다시 연결':'🔗 스트라바 연결'}
 function showLogin(){$('loginBox').classList.remove('hide');$('app').classList.add('hide')}
 async function start(){
   const r=await fetch('/api/me',{credentials:'same-origin'});
   if(r.status===401){showLogin();return}
   $('loginBox').classList.add('hide');$('app').classList.remove('hide');
-  await openDb();ACTS=await allActs();loadSet();render();sync();
+  await openDb();ACTS=await allActs();loadSet();updConnect();render();sync();
 }
 $('loginBtn').onclick=async()=>{
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('pw').value})});

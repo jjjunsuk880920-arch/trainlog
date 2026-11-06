@@ -46,6 +46,10 @@ class StravaClient:
         self._access, self._exp = None, 0.0
         self._lock = threading.Lock()
 
+    @property
+    def refresh_token(self):
+        return self._refresh
+
     def _token(self, force=False):
         with self._lock:
             if force or not self._access or time.time() > self._exp - 60:
@@ -57,7 +61,7 @@ class StravaClient:
                 except (requests.RequestException, ValueError):
                     raise StravaError("스트라바 서버에 연결하지 못했어요.")
                 if not j.get("access_token"):
-                    raise StravaError("스트라바 로그인 정보가 만료됐거나 잘못됐어요. /strava/connect 로 다시 승인하세요.")
+                    raise StravaError("스트라바 로그인 정보가 만료됐거나 잘못됐어요. 화면의 '스트라바 연결' 버튼으로 다시 승인하세요.")
                 self._access, self._exp = j["access_token"], float(j.get("expires_at", time.time() + 3600))
                 self._refresh = j.get("refresh_token") or self._refresh   # 최신 토큰을 메모리에 유지
             return self._access
